@@ -1,7 +1,8 @@
 """Install agent-flow for your Claude Code workspace, safely.
 
 What it does, in order:
-  1. Checks Node.js 18 or newer is installed (explains how to get it if not).
+  1. Checks Python 3.11 or newer and Node.js 22 or newer are installed (and
+     explains how to get them if not).
   2. Asks where your second brain vault and CRM vault are, and which folder to
      watch (the folder that contains both). Saves that in config.json.
   3. Runs agent-flow once, hidden, with a throwaway home folder, so it writes
@@ -34,6 +35,11 @@ import start as starter
 
 LAUNCHER_NAME_WIN = "outliers-agent-flow.vbs"
 LAUNCHER_LABEL_MAC = "com.outliers.agent-flow"
+
+# Python 3.8 stopped getting security fixes on 2024-10-07 and 3.10 dies on 2026-10-31,
+# so the floor is 3.11 (checked 2026-09-22). This installer TESTS it, it does not only
+# name it in the README.
+MIN_PY = (3, 11)
 
 
 # ---------------------------------------------------------------- interview
@@ -247,7 +253,7 @@ def apply_hooks(node_path: str | None) -> dict:
 
 def original_bytes_for(path, wanted: dict) -> bytes | None:
     """The first install's backup, if taking our hooks out gives exactly the settings
-    it holds. Then an uninstall can give back the very same bytes (indentation, line
+    it contains. Then an uninstall can give back the very same bytes (indentation, line
     endings, byte-order mark) instead of a reformatted copy."""
     for bak in sorted(path.parent.glob(path.name + ".bak-agent-flow-2*"), reverse=True):
         try:
@@ -290,18 +296,32 @@ def node_help() -> str:
     elif common.IS_MAC:
         how = "Install the LTS version from https://nodejs.org, or run:\n    brew install node\n"
     else:
-        how = "Install Node.js 20 or newer from https://nodejs.org or your package manager.\n"
-    return ("agent-flow needs Node.js 18 or newer (20 recommended).\n" + how +
+        how = f"Install Node.js {common.MIN_NODE} or newer from https://nodejs.org or your package manager.\n"
+    return (f"agent-flow needs Node.js {common.MIN_NODE} or newer (24 recommended). Node.js 18 stopped "
+            "getting security fixes on 2025-04-30 and Node.js 20 on 2026-04-30.\n" + how +
             "Then close this terminal, open a new one, check with:  node --version\n"
+            "and run install.py again.")
+
+
+def python_help() -> str:
+    want = ".".join(map(str, MIN_PY))
+    have = ".".join(map(str, sys.version_info[:3]))
+    return (f"This kit needs Python {want} or newer. This terminal is running Python {have}, "
+            "which no longer gets security fixes.\n"
+            "Install a current Python from https://python.org (on a Mac, python.org or "
+            "`brew install python`), open a NEW terminal, check with:  python --version\n"
             "and run install.py again.")
 
 
 def do_install(args) -> int:
     print("agent-flow installer (Outliers Accelerator, guide 1 of 4)\n")
+    if tuple(sys.version_info[:2]) < MIN_PY:
+        return refuse(python_help())
+    print(f"Python {'.'.join(map(str, sys.version_info[:3]))} found.")
     ver = common.node_version() if not os.environ.get("AGENT_FLOW_NPX_CMD") else (99, 0, 0)
     if ver is None:
         return refuse("Node.js was not found.\n" + node_help())
-    if ver[0] < 18:
+    if ver[0] < common.MIN_NODE:
         return refuse(f"Node.js {'.'.join(map(str, ver))} is too old.\n" + node_help())
     print(f"Node.js {'.'.join(map(str, ver))} found.")
 

@@ -3,3 +3,6 @@ logs/
 __pycache__/
 .pytest_cache/
 *.pyc
+# Half-made files from the guide renderer: never ship one to a member.
+.tmp-*
+*.tmp

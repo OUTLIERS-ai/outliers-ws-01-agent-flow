@@ -6,6 +6,7 @@ tests can point HOME / USERPROFILE / APPDATA at a temporary folder.
 from __future__ import annotations
 
 import datetime as _dt
+import http.client
 import json
 import os
 import shutil
@@ -23,6 +24,10 @@ IS_MAC = sys.platform == "darwin"
 # The package version this kit was checked against on 2026-09-22.
 DEFAULT_PACKAGE = "agent-flow-app@0.9.1"
 UI_PORT = 3001
+
+# Oldest versions we will run on. Node 18 stopped getting security fixes on
+# 2025-04-30 and Node 20 on 2026-04-30, so the floor is 22 (checked 2026-09-22).
+MIN_NODE = 22
 
 # The 9 Claude Code events the upstream installer hooks.
 EVENTS = [
@@ -189,6 +194,53 @@ def json_error_in_words(exc: Exception) -> str:
     return str(exc)
 
 
+# ------------------------------------------- why agent-flow stopped straight away
+# Read off agent-flow's own last lines so a member is told the reason instead of a
+# file path. Every shape below was seen on 2026-09-22 or is npm's documented wording.
+_ADDRESS_IN_USE = ("eaddrinuse", "address already in use", "winerror 10048",
+                   "only one usage of each socket address")
+_NO_NODE = ("is not recognized as an internal or external command", "command not found",
+            "no such file or directory", "cannot find the path specified")
+_OLD_NODE = ("ebadengine", "unsupported engine", 'required: {"node"', "requires node")
+_NOT_ON_NPM = ("404 not found", "npm error e404", "code e404")
+_NO_INTERNET = ("enotfound", "eai_again", "econnrefused", "etimedout", "network request to",
+                "getaddrinfo", "unable to get local issuer certificate", "self-signed certificate")
+
+
+def log_tail(path, lines: int = 30) -> str:
+    """The last few lines of a log file, or an empty string if it is not there."""
+    try:
+        text = Path(path).read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return ""
+    return "\n".join(text.splitlines()[-lines:])
+
+
+def why_it_stopped(tail: str) -> str:
+    """Plain words for a start that died at once, and what to do about it."""
+    low = (tail or "").lower()
+    if any(w in low for w in _ADDRESS_IN_USE):
+        return ("The port agent-flow needed was taken by another program a moment before it "
+                "started. Run python start.py again.")
+    if any(w in low for w in _OLD_NODE):
+        return (f"The Node.js on this computer is older than {MIN_NODE}. Install Node.js {MIN_NODE} "
+                "or newer from nodejs.org, open a NEW terminal, then run python start.py again.")
+    if any(w in low for w in _NO_NODE):
+        return ("Node.js was not found on this computer. Install it from nodejs.org, open a NEW "
+                "terminal, then run python start.py again.")
+    if any(w in low for w in _NOT_ON_NPM):
+        return (f"npm has no package with the name in config.json. Put it back to {DEFAULT_PACKAGE}, "
+                "then run python start.py again.")
+    if any(w in low for w in _NO_INTERNET):
+        return ("This computer could not reach npm, the store agent-flow is downloaded from, and "
+                "agent-flow is not saved on it yet. Connect to the internet, then run python "
+                "start.py again.")
+    last = [ln.strip() for ln in (tail or "").splitlines() if ln.strip()]
+    if last:
+        return "agent-flow stopped straight away. Its own last line says: " + last[-1][:150]
+    return "agent-flow stopped straight away and wrote nothing to its log."
+
+
 # ---------------------------------------------------------------- settings guard
 BOM = b"\xef\xbb\xbf"
 
@@ -198,22 +250,19 @@ def agent_flow_settings_path() -> Path:
     return home() / ".claude" / "settings.json"
 
 
-def settings_problem() -> str | None:
-    """Why it is NOT safe to start agent-flow right now, or None if it is safe.
+def settings_fault(path: Path | None = None, point_at_check: bool = True) -> str | None:
+    """Why this settings.json cannot be read as it stands, in plain words, or None.
 
-    agent-flow 0.9.1 runs its own setup every time it starts. If it cannot read
-    settings.json (a byte-order mark, a trailing comma, a comment) it throws the
-    whole file away and writes a new one holding only its 9 hooks. It does the
-    same, keeping your other settings, if it cannot find its own hook in the file.
-    So we only start it when it will find everything in order and leave the file alone."""
-    if not hook_script().exists():
-        return f"agent-flow's hook script is missing ({hook_script()}). Run: python install.py"
-    path = agent_flow_settings_path()
-    is_claudes = norm_path(path) == norm_path(settings_path())
+    start.py (before a start) and check_hooks.py (on request) both call this, so the
+    2 can never disagree about the same file the way they did before 2026-09-22:
+    an empty file was called OK by one and refused by the other."""
+    path = path or settings_path()
     if not path.exists():
-        return ("Claude Code's settings.json does not exist yet, so agent-flow would write its own. "
-                "Run: python install.py") if is_claudes else None
+        return None  # the caller decides what a missing file means
     raw = path.read_bytes()
+    if not raw.strip():
+        return (f"{path} is empty. agent-flow cannot read an empty file, so at its next start it "
+                "would replace it with a file that has only its own 9 hooks in it. Run: python install.py")
     if raw.startswith(BOM):
         return (f"{path} starts with an invisible byte-order mark (some editors and PowerShell add it). "
                 "agent-flow cannot read a file like that and would replace it. Run: python install.py "
@@ -224,10 +273,33 @@ def settings_problem() -> str | None:
         return f"{path} is not plain UTF-8 text. Fix it, then run: python install.py"
     except ValueError as exc:
         return (f"{path} cannot be read ({json_error_in_words(exc)}). agent-flow would replace the "
-                "whole file. Open it at that line, fix it and save, then run: python check_hooks.py")
+                "whole file. Open it at that line, fix it and save"
+                + (", then run: python check_hooks.py" if point_at_check else "."))
     if not isinstance(data, dict):
         return (f"{path} does not start with {{ and end with }}, so it is not a settings file. "
                 "Fix it, then run: python install.py")
+    return None
+
+
+def settings_problem() -> str | None:
+    """Why it is NOT safe to start agent-flow right now, or None if it is safe.
+
+    agent-flow 0.9.1 runs its own setup every time it starts. If it cannot read
+    settings.json (a byte-order mark, a trailing comma, a comment) it throws the
+    whole file away and writes a new file with only its 9 hooks in it. It does the
+    same, keeping your other settings, if it cannot find its own hook in the file.
+    So we only start it when it will find everything in order and leave the file alone."""
+    if not hook_script().exists():
+        return f"agent-flow's hook script is missing ({hook_script()}). Run: python install.py"
+    path = agent_flow_settings_path()
+    is_claudes = norm_path(path) == norm_path(settings_path())
+    if not path.exists():
+        return ("Claude Code's settings.json does not exist yet, so agent-flow would write its own. "
+                "Run: python install.py") if is_claudes else None
+    fault = settings_fault(path)
+    if fault:
+        return fault
+    data = strict_loads(path.read_bytes().decode("utf-8"))
     try:
         counts = count_agent_flow(data)
     except (AttributeError, TypeError):
@@ -436,6 +508,21 @@ def port_answers(port: int, timeout: float = 0.4) -> bool:
         with socket.create_connection(("127.0.0.1", int(port)), timeout=timeout):
             return True
     except OSError:
+        return False
+
+
+def http_answers(port: int, timeout: float = 1.5) -> bool:
+    """True when something on this port ANSWERS a web request. port_answers only proves
+    the number is taken, which another program sitting on it also does; this proves a web
+    server is there. Told the 2 apart after the 2026-09-22 private-port race."""
+    try:
+        c = http.client.HTTPConnection("127.0.0.1", int(port), timeout=timeout)
+        c.request("GET", "/", headers={"Host": f"127.0.0.1:{port}"})
+        resp = c.getresponse()
+        resp.read(1)
+        c.close()
+        return True
+    except Exception:
         return False
 
 

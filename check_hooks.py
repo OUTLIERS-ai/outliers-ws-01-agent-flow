@@ -58,23 +58,23 @@ def main(argv=None) -> int:
     if not path.exists():
         print(f"No settings file at {path}. Nothing to check.")
         return 0
-    raw = path.read_bytes()
+    # The same reader start.py uses before a start, so the 2 always agree about a file.
+    fault = common.settings_fault(path, point_at_check=False)
+    if fault:
+        print(f"Settings file: {path}")
+        print(f"RESULT: PROBLEM - {fault}")
+        print("start.py will not start agent-flow until this is put right, to stop agent-flow "
+              "replacing the file. Save your fix, then run this check again.")
+        return 2
     try:
         settings = common.read_settings(path)
     except (ValueError, UnicodeDecodeError) as exc:
         print(f"Settings file: {path}")
         print(f"RESULT: PROBLEM - settings.json cannot be read ({common.json_error_in_words(exc)}).")
-        print("Open the file at that line and fix it. The usual cause is a comma after the last item "
-              "in a list or block. Claude Code and agent-flow cannot read it until then, and start.py "
-              "will not start agent-flow.")
         return 2
     if not isinstance(settings.get("hooks") or {}, dict):
         print(f"RESULT: PROBLEM - 'hooks' in {path} is not a block of events. Fix it by hand.")
         return 2
-    if raw.startswith(common.BOM):
-        print("Note: settings.json starts with an invisible byte-order mark. agent-flow cannot read a file "
-              "like that and start.py will not start it. Run python install.py to remove the mark "
-              "(a backup is taken first).")
     hooks = settings.get("hooks") or {}
     print(f"Settings file: {path}")
     total = 0

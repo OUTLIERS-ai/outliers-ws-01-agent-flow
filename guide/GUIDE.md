@@ -114,9 +114,10 @@ Before this guide went out, the kit was tested by someone trying to break it, us
 - agent-flow exactly as its author published it, downloaded by your own computer from npm. We changed none of its code.
 - The hook entry in settings.json written with forward slashes (/), so agent-flow recognises it and never adds another copy.
 - A small file in your Startup folder that starts agent-flow when you log in, with no window, from the folder that contains your vaults, with usage tracking off.
-- `cleanup.py`, which deletes leftover registration files from servers that have stopped, run automatically before every start.
+- `cleanup.py`, which deletes leftover registration files from servers that have stopped AND ends a second server left watching the same folder, run automatically before every start.
 - `check_hooks.py`, a count of every hook on every event.
 - `guard.py`, which puts settings.json back if agent-flow wipes it and refuses page requests from other websites (both found when we tried to break the kit on 2026-09-22).
+- A start that fails telling you why in 1 sentence, instead of pointing at a log full of Node.js text (added 2026-09-23 after a reliability run of 34 starts found the 1 that failed was undecodable).
 
 ## Pros and cons
 
@@ -128,7 +129,7 @@ Before this guide went out, the kit was tested by someone trying to break it, us
 | Accuracy | Tool calls and subagents come straight from Claude Code's own events. | Token counts and costs are estimates. On Ashley's PC they disagreed with FleetView (the session-and-cost screen in piece 2 of 4) for the same session. |
 | Privacy | The page only listens on your own computer, and guard.py (our program between agent-flow and your browser) refuses requests addressed to anything but your own computer. | Tab titles show the first words of your prompts, so take care when screen-sharing. Usage tracking is on unless switched off (our start-at-logon file switches it off). A website that guesses a port number can still draw fake sessions on your screen. |
 | Safety | Our kit will not start agent-flow on a settings file it would wipe, and puts the file back if it changes anyway. | agent-flow's own set-up still runs at every start; our checks run before and after it; they do not stop it running. |
-| Windows | Our kit fixes the 2 known Windows faults: the start folder, and leftover registration files that swallow events. | Leftover registration files still appear if agent-flow is closed by force (for example from Task Manager) instead of with `python start.py --stop`; `start.py` deletes them before each start. |
+| Windows | Our kit fixes the 2 known Windows faults: the start folder, and leftover registration files that swallow events. Closing agent-flow by force (from Task Manager, or a crash) used to leave a second server running and sending the same events twice; `cleanup.py` now counts servers rather than folders, ends the extra one, and says so. | agent-flow's own registration files are still written by agent-flow, so a server closed by force leaves its file behind until the next `python start.py` or `python cleanup.py`. |
 
 ![The cost of having the hook installed: 1 short-lived program per tool call, whether or not the page is open.](img/per-tool-call.png)
 
@@ -137,9 +138,9 @@ Before this guide went out, the kit was tested by someone trying to break it, us
 | You need | How to check | If it is missing |
 |---|---|---|
 | Claude Code | `claude --version` | You have it from earlier Outliers Accelerator sessions. |
-| Python 3.8 or newer | `python --version` (Mac: `python3 --version`) | python.org |
+| Python 3.11 or newer | `python --version` (Mac: `python3 --version`) | python.org. `install.py` tests this and stops if it is older, because Python 3.8 stopped getting security fixes on 2024-10-07 and 3.10 stops on 2026-10-31. |
 | Git | `git --version` | git-scm.com |
-| Node.js 18 or newer | `node --version` | Get version 20.19 or newer: FleetView (piece 2 of 4) refuses anything older. Windows: the LTS installer (long-term support, the stable version) from nodejs.org, or `winget install OpenJS.NodeJS.LTS` (winget is Windows' built-in install command). Mac: nodejs.org or `brew install node` (if you have Homebrew, a Mac install tool). Then open a NEW terminal (the text window where you type commands), because a terminal opened before the install cannot find Node.js. |
+| Node.js 22 or newer | `node --version` | Version 24 is the one to get. Node.js 18 stopped getting security fixes on 2025-04-30 and Node.js 20 on 2026-04-30, so `install.py` stops on anything below 22. Windows: the LTS installer (long-term support, the stable version) from nodejs.org, or `winget install OpenJS.NodeJS.LTS` (winget is Windows' built-in install command). Mac: nodejs.org or `brew install node` (if you have Homebrew, a Mac install tool). Then open a NEW terminal (the text window where you type commands), because a terminal opened before the install cannot find Node.js. |
 | Port 3001 free (the number the page is served on) | Open http://127.0.0.1:3001 in a browser; it should fail to load | Install with `python install.py --port 3002` instead, then use 3002 wherever this guide says 3001. |
 
 ![The 4 checks as they printed on a test PC on 2026-09-22. Your version numbers can be higher.](img/version-checks.png)
@@ -165,7 +166,7 @@ git clone https://github.com/OUTLIERS-ai/outliers-ws-01-agent-flow; cd outliers-
 4. Wait for the first run. The installer downloads agent-flow and starts it once, with no window, pointed at a temporary empty folder that stands in for your home folder, so it writes its own `hook.js` without touching your settings. It copies that script into your `.claude/agent-flow` folder and stops it. This can take up to 3 minutes on a slow connection. No login is needed.
 5. Read the table the installer prints at the end: 1 row per kind of event. Every event should show `1` in the "after" column. If you had old copies, the "before" column shows how many, and a dated backup of your settings is named on screen. The file that starts agent-flow at logon is `outliers-agent-flow.vbs` in your Startup folder; that is the name you see in Windows' Startup apps list.
 
-![What a successful install prints. Paths shortened to C:\Users\<you>; the demo ran in a test folder on 2026-09-22, and "Demo CRM" is a made-up vault.](img/install-output.png)
+![What a successful install prints, retaken 2026-09-23 with the 2 version checks it now runs first. Paths shortened to C:\Users\<you>; the demo ran in a made-up home folder, and "Demo CRM" is an invented vault.](img/install-output.png)
 
 6. Start it now: `python start.py`. From now on it also starts by itself, with no window, each time you log in.
 7. Open http://127.0.0.1:3001. You see "Waiting for agent session".
@@ -189,6 +190,7 @@ Every command below runs inside the downloaded folder. In a new terminal, type `
 - **The Files, Chat, Cost and Timeline buttons** top right open side panels: which files were touched, the conversation, the estimated cost, and a timeline of every call.
 - **Check your hooks once a week:** `python check_hooks.py`. Anything other than 1 per event means something else has been writing to your settings.
 - **If the page goes quiet:** run `python start.py --stop`, then `python start.py`, then open a new Claude Code session.
+- **If a start fails,** it now tells you why in 1 sentence on screen: the port was taken, the internet is not reachable and agent-flow is not saved on this computer yet, Node.js is missing or too old, or the package name in `config.json` is wrong. `python start.py --status` repeats that sentence later.
 - **Stopping:** `python start.py --stop` says "Stopped agent-flow." or "agent-flow was not running. Nothing to stop." Check any time with `python start.py --status`.
 - **If you move your vaults**, run `python install.py` again and give the new watch folder. The suggestion in square brackets is your OLD watch folder, so type the new one. If the server was running, the installer stops it and starts it again for the new folder.
 - **Screen-sharing:** close the tab or pick a demo session first. Tab titles show the start of your prompts.
@@ -282,20 +284,20 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 |---|---|
 | (none) | Checks settings.json, deletes leftover registration files, starts agent-flow with no window, prints the address. |
 | `--stop` | Stops the server this kit started. |
-| `--status` | Says "Running" or "Not running", and if the last start was refused, why. Exit code 0 when running, 1 when not. |
+| `--status` | Says "Running" or "Not running", and if the last start was refused or failed, the 1-sentence reason. Exit code 0 when running, 1 when not. |
 | `--port`, `--watch-folder`, `--package`, `--wait` | Override `config.json` for this run only. |
 | `--foreground`, `--quiet` | Used by the files that start agent-flow at logon: wait instead of returning (the Mac login job), and print nothing (the Windows file). |
 
 
 **check_hooks.py**: `--fix` keeps 1 copy of each repeated hook after a dated backup; `--settings <file>` checks a different settings file. Exit codes: 0 all well, 1 duplicates found, 2 the file cannot be read.
 
-**cleanup.py**: `--dry-run` only reports what it would delete; `--quiet` prints nothing.
+**cleanup.py**: `--dry-run` only reports what it would delete or end; `--quiet` prints nothing. It removes registration files for servers that have stopped, and when 2 servers are watching the same folder (what closing agent-flow by force leaves behind) it ends the older server and takes its file away.
 
 **Files the kit makes while it runs**
 
 - `config.json`: your 2 vault paths, the watch folder, the agent-flow version, the port and whether the start-at-logon file is on. `config.example.json` shows what the file looks like.
 - `logs/start.log`: the kit's own notes, such as a refused start or a settings file put back.
-- `logs/agent-flow.log`: agent-flow's own output. Read it when the server stops straight away.
+- `logs/agent-flow.log`: agent-flow's own output. `start.py` reads its last 30 lines to work out the 1-sentence reason it prints when a start fails; open it yourself for the full text.
 - `logs/agent-flow.pid` (PID stands for process ID, the number Windows gives the running program): that number and the server's start time, so `--stop` finds it and nothing else.
 - Settings backups next to `settings.json`: `settings.json.bak-agent-flow-<date>` (before install), `.bak-agent-flow-uninstall-<date>`, `.bak-hookdedupe-<date>` (before `--fix`) and `.bak-agent-flow-undo-<date>` (agent-flow's rewritten version, kept when `guard.py` put yours back).
 - The file that starts agent-flow at logon: on Windows `outliers-agent-flow.vbs` in your Startup folder; on a Mac a login job, `~/Library/LaunchAgents/com.outliers.agent-flow.plist`, which runs at your next login (to start it now: `launchctl load` followed by that path).
@@ -313,16 +315,23 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 | The page says "Waiting for agent session" forever | The session was already open when the server started, or it runs outside the watch folder. | Open a NEW session inside the watch folder. Check the folder with `python start.py --status` and `config.json`. |
 | Still nothing after a new session | A leftover file from an old agent-flow server, pointing at a folder deeper inside your watch folder, is taking the events (Windows only). | `python cleanup.py`, then `python start.py --stop` and `python start.py`, then a new session. |
 | "agent-flow was NOT started, to protect your Claude Code settings" | settings.json has a typing error, or an invisible marker at its very start that some editors add (a byte-order mark); agent-flow would have replaced the whole file. | Error with a line number: open settings.json at that line, fix it (a comma after the last item is the usual cause), save. Byte-order mark: run `python install.py`, which removes it after a backup. Then `python start.py`. |
-| The page never loads after logging in | start.py's settings check refused to start agent-flow at logon, without telling you. | `python start.py --status` shows the reason; fix as for the "agent-flow was NOT started" message. |
+| The page never loads after logging in | The settings check refused to start agent-flow at logon, or the start failed, and nothing was on screen to tell you. | `python start.py --status` prints the 1-sentence reason; fix as it says, then `python start.py`. |
+| "agent-flow did not start", then a sentence | The start failed. The sentence names the cause: the port was taken, the internet could not be reached and agent-flow is not saved on this computer yet, Node.js is missing or too old, or the package name in `config.json` is wrong. | Do what the sentence says. For a taken port, run `python start.py` again. `logs/agent-flow.log` has the full text if you want it. |
+| "Ended 1 agent-flow server(s) left behind when the last one was closed by force" | agent-flow was closed from Task Manager, or the computer shut down without `python start.py --stop`, so agent-flow outlived the program that started it. | Nothing to do. It has already been ended. Use `python start.py --stop` rather than Task Manager and it will not happen again. |
 | Command windows flash on screen on every tool call | Hook copies have piled up. Before this kit, agent-flow added 1 more copy each time it started on Windows. | `python check_hooks.py --fix`, then `python install.py` to rewrite the line with forward slashes. |
 | "Port 3001 is already in use" | Another program uses that port. | `python install.py --port 3002`, then `python start.py`, then open http://127.0.0.1:3002. |
 | The installer stops: Node.js not found | Node.js is not installed, or the terminal was opened before installing it. | Install it (see Before you start), open a NEW terminal, run again. Nothing was changed. |
 | The installer stops: could not read settings.json | The file has a typing error in it. `check_hooks.py` shows the same fault with the line and column. | Open settings.json at that line, fix the error, run again. Your Claude Code settings were not changed. |
+| `check_hooks.py` says settings.json is empty | The file is there but has nothing in it. agent-flow cannot read an empty file, so at its next start it would replace it with a file that has only its own 9 hooks in it. `start.py` refuses to start it for the same reason. | `python install.py`. It writes the 9 hooks into the file properly, after a backup. |
 | A file called `settings.json.bak-agent-flow-undo-<date>` appeared | agent-flow rewrote your settings after starting and `guard.py` (our program between agent-flow and your browser) put your version back. The file is agent-flow's version, kept for you to look at. | Nothing to do. `logs/start.log` records when it happened. |
 | Counts and costs differ from another dashboard | agent-flow's token and cost figures are estimates. | Treat them as a rough guide, not a bill. |
 | A change you made to the screen "should work" but looks wrong | The change was checked by reading its data. On 2026-06-12 our attempt to show every session on 1 screen had the right data while the screen showed 6 hexagons stacked on 1 spot. | Take a screenshot and look at it before calling it done. |
 
-![A settings file with a comma after its last item: the start is refused, --status says why, and check_hooks.py names the line.](img/start-refused.png)
+![A settings file with a comma after its last item: the start is refused, `--status` repeats the reason, and `check_hooks.py` says the same words. The last block is an EMPTY settings.json, which the 2 used to disagree about until 2026-09-23. Made-up home folder, 2026-09-23.](img/start-refused.png)
+
+![A start that failed, saying why in 1 sentence instead of pointing at a log. Staged on 2026-09-23 by taking the port agent-flow needed; the words are the ones the kit really prints.](img/start-failed-says-why.png)
+
+![Closing agent-flow by force leaves a second server on the same folder. `cleanup.py` counts servers rather than folders, ends the older server, and the next start says so. Made-up home folder, 2026-09-23.](img/leftover-server-ended.png)
 
 > **Warning:** do not run `npx agent-flow-app` by hand while this kit is installed. You get 2 servers, sessions report only to the one watching the smallest folder, and a hand-started copy runs without our settings check, so it can wipe settings.json. Use `python start.py` instead.
 

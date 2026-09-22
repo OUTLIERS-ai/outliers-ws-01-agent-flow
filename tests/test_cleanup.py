@@ -25,7 +25,7 @@ def test_cleanup_keeps_live_and_removes_stale(temp_home, tmp_path):
         (d / "ddd-4.json").write_text("not json", encoding="utf-8")                 # unreadable
         (d / "hook.js").write_text("//", encoding="utf-8")
         dry = cleanup.run(dry_run=True, quiet=True)
-        assert dry == {"kept": 1, "removed": 3, "dry_run": True}
+        assert dry == {"kept": 1, "removed": 3, "ended": 0, "dry_run": True}
         assert len(list(d.glob("*.json"))) == 4
         res = cleanup.run(quiet=True)
         assert res["kept"] == 1 and res["removed"] == 3
@@ -35,4 +35,4 @@ def test_cleanup_keeps_live_and_removes_stale(temp_home, tmp_path):
 
 
 def test_cleanup_with_no_folder_is_harmless(temp_home):
-    assert cleanup.run(quiet=True) == {"kept": 0, "removed": 0, "dry_run": False}
+    assert cleanup.run(quiet=True) == {"kept": 0, "removed": 0, "ended": 0, "dry_run": False}

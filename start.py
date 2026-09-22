@@ -112,6 +112,14 @@ def start(workspace: str, package: str, port: int, wait_s: float, foreground: bo
     if servers_for(workspace) and common.port_answers(port):
         say(f"Already running for {workspace}. Open http://127.0.0.1:{port}")
         return 0
+    leftover = servers_for(workspace)
+    if leftover:
+        # Registered for this folder, but nothing is serving the page: agent-flow
+        # outlived the guard that started it (Task Manager, a log-off, a crash).
+        # Starting on top of it would leave 2 servers and 2 node programs running.
+        n = cleanup.end_servers(leftover)
+        say(f"Ended {n} agent-flow server(s) left behind when the last one was closed by force.")
+        log_line(f"[start.py] ended {n} agent-flow server(s) left behind for {workspace}")
     if common.port_answers(port):
         say(f"Port {port} is already in use by another program. "
             f"Pick another with:  python install.py --port {port + 1}   then:  python start.py")
@@ -127,7 +135,13 @@ def start(workspace: str, package: str, port: int, wait_s: float, foreground: bo
                 return proc.wait()
             return 0
         if proc.poll() is not None:
-            say(f"The server stopped straight away. See {common.logs_dir() / 'agent-flow.log'}")
+            # Say WHY, read off agent-flow's own last lines, and write it down as a
+            # refusal so `python start.py --status` can repeat it later.
+            why = common.why_it_stopped(common.log_tail(common.logs_dir() / "agent-flow.log", 30))
+            log_line(f"{REFUSED} {why}")
+            say("agent-flow did not start.")
+            say(why)
+            say(f"The full detail is in {common.logs_dir() / 'agent-flow.log'}")
             return 4
         time.sleep(0.5)
     say(f"Still starting after {int(wait_s)} seconds (the first run downloads the package). "
@@ -205,7 +219,7 @@ def main(argv=None) -> int:
         if not live:
             why = last_refusal()
             if why:
-                print("Last start was refused: " + why.split(REFUSED, 1)[1].strip())
+                print("Why the last start did not work: " + why.split(REFUSED, 1)[1].strip())
         return 0 if live else 1
     return start(args.watch_folder, args.package, args.port, args.wait, args.foreground, args.quiet)
 

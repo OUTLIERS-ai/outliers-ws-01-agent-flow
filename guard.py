@@ -1,7 +1,7 @@
 """Runs agent-flow behind 2 safety checks. start.py starts this; you never run it by hand.
 
 1. Your settings.json. agent-flow 0.9.1 runs its own setup each time it starts and,
-   if it cannot read settings.json, writes a new one holding only its hooks. start.py
+   if it cannot read settings.json, writes a new file with only its hooks in it. start.py
    refuses to start it when the file is not safe; this file also keeps a copy of the
    exact bytes before agent-flow starts, watches the file for the first 60 seconds,
    and if agent-flow rewrote it, keeps the rewritten version as
@@ -47,6 +47,48 @@ def free_port() -> int:
     port = s.getsockname()[1]
     s.close()
     return port
+
+
+# Seconds a child has to die before we treat it as the port race rather than a real fault.
+RACE_WINDOW_S = 12.0
+
+
+def start_child(workspace: str, package: str, out, attempts: int = 3, on_tick=None):
+    """Start agent-flow on a private port and hand back (child, port).
+
+    Windows can give that port number to another program in the moment between us
+    letting go of it and agent-flow claiming it. It happened once in 34 starts on
+    2026-09-22. agent-flow prints the port it was given, not the port it got, so we
+    cannot read the real one back from it: instead, when the child dies within a few
+    seconds and the port is now answering to somebody else, we pick another number
+    and try again. (child, port) is (None, last port) when every try failed."""
+    env = dict(os.environ, **common.QUIET_ENV)
+    kwargs = dict(cwd=workspace, env=env, stdin=subprocess.DEVNULL, stdout=out,
+                  stderr=subprocess.STDOUT)
+    if common.IS_WIN:
+        kwargs["creationflags"] = common.NO_WINDOW
+    port = 0
+    for attempt in range(1, attempts + 1):
+        port = free_port()
+        child = subprocess.Popen(common.npx_command(package) + ["--no-open", "--port", str(port)],
+                                 **kwargs)
+        started = time.time()
+        while time.time() - started < RACE_WINDOW_S:
+            if on_tick:
+                on_tick()
+            if child.poll() is None and common.http_answers(port):
+                return child, port
+            if child.poll() is not None:
+                break
+            time.sleep(0.2)
+        if child.poll() is None:
+            return child, port  # slow first download: let run() keep waiting on it
+        tail = common.log_tail(common.logs_dir() / "agent-flow.log", 30).lower()
+        race = common.port_answers(port) or any(w in tail for w in common._ADDRESS_IN_USE)
+        if not race or attempt == attempts:
+            return None, port
+        log(f"private port {port} was taken by another program; trying another (try {attempt + 1} of {attempts})")
+    return None, port
 
 
 def allowed_hosts(port: int) -> set[str]:
@@ -121,16 +163,8 @@ def make_handler(public_port: int, private_port: int):
 def run(workspace: str, package: str, port: int, wait_s: float) -> int:
     settings = common.agent_flow_settings_path()
     before = settings.read_bytes() if settings.exists() else None
-    private = free_port()
-    cmd = common.npx_command(package) + ["--no-open", "--port", str(private)]
-    env = dict(os.environ, **common.QUIET_ENV)
+    common.logs_dir().mkdir(parents=True, exist_ok=True)
     out = open(common.logs_dir() / "agent-flow.log", "ab")
-    kwargs = dict(cwd=workspace, env=env, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT)
-    if common.IS_WIN:
-        kwargs["creationflags"] = common.NO_WINDOW
-    log(f"starting agent-flow for {workspace} (private port {private}, page on {port})")
-    child = subprocess.Popen(cmd, **kwargs)
-    started = time.time()
 
     def check_settings():
         nonlocal before
@@ -145,8 +179,17 @@ def run(workspace: str, package: str, port: int, wait_s: float) -> int:
         else:
             before = now  # a normal edit by you or Claude Code: accept it
 
+    log(f"starting agent-flow for {workspace} (page on {port})")
+    child, private = start_child(workspace, package, out, on_tick=check_settings)
+    started = time.time()
     server = None
     try:
+        if child is None:
+            check_settings()
+            why = common.why_it_stopped(common.log_tail(common.logs_dir() / "agent-flow.log", 30))
+            log(f"agent-flow stopped straight away. {why}")
+            return 4
+        log(f"agent-flow answering on private port {private}")
         while time.time() - started < wait_s and child.poll() is None:
             check_settings()
             if common.port_answers(private):
@@ -154,7 +197,8 @@ def run(workspace: str, package: str, port: int, wait_s: float) -> int:
             time.sleep(0.3)
         if child.poll() is not None:
             check_settings()
-            log(f"agent-flow stopped straight away (exit code {child.returncode})")
+            why = common.why_it_stopped(common.log_tail(common.logs_dir() / "agent-flow.log", 30))
+            log(f"agent-flow stopped straight away (exit code {child.returncode}). {why}")
             return 4
         try:
             server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(port, private))
@@ -173,7 +217,7 @@ def run(workspace: str, package: str, port: int, wait_s: float) -> int:
     finally:
         if server is not None:
             server.shutdown()
-        if child.poll() is None:
+        if child is not None and child.poll() is None:
             common.kill_tree(child.pid)
         out.close()
 
