@@ -86,7 +86,8 @@ def launch_agents_dir() -> Path:
 
 # ---------------------------------------------------------------- files
 def detect_eol(path: Path) -> str:
-    """Keep the file's own line endings, so an uninstall gives back the same bytes."""
+    """Keep the file's own line endings (an uninstall restores the exact original bytes
+    from the install backup when it can; see install.remove_hooks)."""
     try:
         return "\r\n" if b"\r\n" in path.read_bytes() else "\n"
     except OSError:
@@ -109,6 +110,22 @@ def atomic_write_text(path: Path, text: str, eol: str = "\n") -> None:
         raise
 
 
+def atomic_write_bytes(path: Path, data: bytes) -> None:
+    """Same as atomic_write_text, for exact bytes (used to put a file back as it was)."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=path.name + ".", suffix=".tmp", dir=str(path.parent))
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(data)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
 def backup(path: Path, tag: str) -> Path | None:
     if not path.exists():
         return None
@@ -122,6 +139,15 @@ def backup(path: Path, tag: str) -> Path | None:
     return dest
 
 
+def _no_constants(name):
+    raise ValueError(f"{name} is not allowed in JSON")
+
+
+def strict_loads(text: str):
+    """Parse JSON the way Node's JSON.parse does: no NaN/Infinity, no comments, no trailing commas."""
+    return json.loads(text, parse_constant=_no_constants)
+
+
 def read_settings(path: Path | None = None) -> dict:
     path = path or settings_path()
     if not path.exists():
@@ -129,10 +155,94 @@ def read_settings(path: Path | None = None) -> dict:
     text = path.read_text(encoding="utf-8-sig")
     if not text.strip():
         return {}
-    data = json.loads(text)
+    data = strict_loads(text)
     if not isinstance(data, dict):
         raise ValueError(f"{path} is not a JSON object")
     return data
+
+
+def json_error_in_words(exc: Exception) -> str:
+    """'line 10, column 26: Expecting ',' delimiter' instead of a Python error dump."""
+    if isinstance(exc, json.JSONDecodeError):
+        return f"line {exc.lineno}, column {exc.colno}: {exc.msg}"
+    return str(exc)
+
+
+# ---------------------------------------------------------------- settings guard
+BOM = b"\xef\xbb\xbf"
+
+
+def agent_flow_settings_path() -> Path:
+    """The file agent-flow itself reads and rewrites. It ignores CLAUDE_CONFIG_DIR."""
+    return home() / ".claude" / "settings.json"
+
+
+def settings_problem() -> str | None:
+    """Why it is NOT safe to start agent-flow right now, or None if it is safe.
+
+    agent-flow 0.9.1 runs its own setup every time it starts. If it cannot read
+    settings.json (a byte-order mark, a trailing comma, a comment) it throws the
+    whole file away and writes a new one holding only its 9 hooks. It does the
+    same, keeping your other settings, if it cannot find its own hook in the file.
+    So we only start it when it will find everything in order and leave the file alone."""
+    if not hook_script().exists():
+        return f"agent-flow's hook script is missing ({hook_script()}). Run: python install.py"
+    path = agent_flow_settings_path()
+    is_claudes = norm_path(path) == norm_path(settings_path())
+    if not path.exists():
+        return ("Claude Code's settings.json does not exist yet, so agent-flow would write its own. "
+                "Run: python install.py") if is_claudes else None
+    raw = path.read_bytes()
+    if raw.startswith(BOM):
+        return (f"{path} starts with an invisible byte-order mark (some editors and PowerShell add it). "
+                "agent-flow cannot read a file like that and would replace it. Run: python install.py "
+                "(it removes the mark after a backup).")
+    try:
+        data = strict_loads(raw.decode("utf-8"))
+    except UnicodeDecodeError:
+        return f"{path} is not plain UTF-8 text. Fix it, then run: python install.py"
+    except ValueError as exc:
+        return (f"{path} is not valid JSON ({json_error_in_words(exc)}). agent-flow would replace the "
+                "whole file. Open it at that line (often a comma after the last item), save, "
+                "then run: python check_hooks.py")
+    if not isinstance(data, dict):
+        return f"{path} is not a JSON object. Fix it, then run: python install.py"
+    try:
+        counts = count_agent_flow(data)
+    except (AttributeError, TypeError):
+        return f"{path} has a 'hooks' block in a shape agent-flow does not expect. Run: python install.py"
+    if not any(counts.values()) and is_claudes:
+        return "The agent-flow hooks are not in settings.json. Run: python install.py"
+    return None
+
+
+def settings_changed_by_agent_flow(before: bytes, after: bytes) -> bool:
+    """True when a change looks like agent-flow's rewrite, not a normal edit by the member
+    or by Claude Code: the file no longer reads, a top-level setting vanished, or the
+    agent-flow hook count moved away from what it was."""
+    if before == after:
+        return False
+    try:
+        old = strict_loads(before.decode("utf-8-sig"))
+        new = strict_loads(after.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return True
+    if not isinstance(new, dict) or not isinstance(old, dict):
+        return True
+    if set(old) - set(new):
+        return True
+    try:
+        return count_agent_flow(new) != count_agent_flow(old)
+    except (AttributeError, TypeError):
+        return True
+
+
+def put_settings_back(before: bytes, path: Path | None = None) -> Path | None:
+    """Keep a copy of the changed file, then put the original bytes back. Returns the copy."""
+    path = path or agent_flow_settings_path()
+    kept = backup(path, "agent-flow-undo")
+    atomic_write_bytes(path, before)
+    return kept
 
 
 def dump_settings(data: dict) -> str:
@@ -171,7 +281,7 @@ def count_agent_flow(settings: dict) -> dict:
         n = 0
         for group in hooks.get(ev) or []:
             for h in (group or {}).get("hooks") or []:
-                if is_agent_flow_command(h.get("command")):
+                if isinstance(h, dict) and is_agent_flow_command(h.get("command")):
                     n += 1
         out[ev] = n
     return out
@@ -252,6 +362,31 @@ def duplicate_report(settings: dict) -> dict:
 
 
 # ---------------------------------------------------------------- processes
+def process_start_time(pid: int):
+    """When the process with this number started, or None. Used to tell our own server
+    apart from an unrelated program that got the same number after a restart."""
+    if pid <= 0:
+        return None
+    if IS_WIN:
+        import ctypes
+
+        k32 = ctypes.windll.kernel32
+        handle = k32.OpenProcess(0x1000, False, int(pid))
+        if not handle:
+            return None
+        c, e, k, u = (ctypes.c_ulonglong() for _ in range(4))
+        ok = k32.GetProcessTimes(handle, ctypes.byref(c), ctypes.byref(e), ctypes.byref(k), ctypes.byref(u))
+        k32.CloseHandle(handle)
+        return int(c.value) if ok else None
+    try:
+        out = subprocess.run(["ps", "-o", "lstart=", "-p", str(int(pid))], capture_output=True,
+                             text=True, timeout=10, creationflags=NO_WINDOW)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    txt = (out.stdout or "").strip()
+    return txt or None
+
+
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False

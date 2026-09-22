@@ -81,7 +81,7 @@ def test_upstream_style_start_piles_up_copies_without_our_fix(temp_home, tmp_pat
     work = tmp_path / "work"
     work.mkdir()
     for _ in range(3):
-        p = start.launch(str(work), "x", free_port())
+        p = start.launch_raw(str(work), "x", free_port())
         deadline = time.time() + 30
         while time.time() < deadline and not start.servers_for(str(work)):
             time.sleep(0.2)

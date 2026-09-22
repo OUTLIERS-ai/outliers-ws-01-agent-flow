@@ -1,11 +1,18 @@
 """A stand-in for `npx agent-flow-app`, used only by the tests.
 
-It copies the upstream start-up behaviour that matters to us:
-- writes <home>/.claude/agent-flow/hook.js if missing;
-- adds 1 hook entry per event when it cannot see its own marker text
-  'agent-flow/hook.js' (upstream 0.9.1 checks with a forward slash, so a Windows
-  path with backslashes is never seen and a new copy is added on every start);
-- writes a discovery file <code>-<pid>.json and listens until it is killed.
+It copies the upstream 0.9.1 start-up behaviour that matters to us (read from
+dist/app.js, scripts/setup.js, on 2026-09-22):
+- "already set up" means: hook.js exists AND settings.json parses as strict JSON
+  AND some event has an entry whose command contains 'agent-flow/hook.js'.
+  A byte-order mark or a trailing comma makes the parse fail.
+- if not set up: writes hook.js if missing, then reads settings.json; if that read
+  fails it STARTS FRESH ({}), adds 1 hook per event with a native-separator path,
+  and writes the file straight over the old one (no backup, not atomic).
+- serves a web page on --port: GET / (html), GET /events (a stream), anything else 404.
+- writes a discovery file <code>-<pid>.json and runs until it is killed.
+
+FAKE_AF_CLOBBER=1 makes it rewrite settings.json with only its hooks even when it
+is already set up, so the tests can prove start.py puts the file back.
 """
 import hashlib
 import json
@@ -14,6 +21,7 @@ import socket
 import sys
 import threading
 import time
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 EVENTS = ["SessionStart", "PreToolUse", "PostToolUse", "PostToolUseFailure", "SubagentStart",
@@ -26,18 +34,30 @@ hook = d / "hook.js"
 settings_p = home / ".claude" / "settings.json"
 
 
+def strict_load(text):
+    return json.loads(text, parse_constant=lambda c: (_ for _ in ()).throw(ValueError(c)))
+
+
 def already():
     if not hook.exists() or not settings_p.exists():
         return False
-    s = json.loads(settings_p.read_text(encoding="utf-8"))
+    try:
+        s = strict_load(settings_p.read_text(encoding="utf-8"))  # a BOM stays in, so it fails like Node
+    except Exception:
+        return False
     return any("agent-flow/hook.js" in h.get("command", "")
                for groups in (s.get("hooks") or {}).values() for g in groups for h in g.get("hooks", []))
 
 
-if not already():
+def configure(start_fresh=False):
     if not hook.exists():
         hook.write_text("// fake hook for tests\n", encoding="utf-8")
-    s = json.loads(settings_p.read_text(encoding="utf-8")) if settings_p.exists() else {}
+    s = {}
+    if not start_fresh and settings_p.exists():
+        try:
+            s = strict_load(settings_p.read_text(encoding="utf-8"))
+        except Exception:
+            s = {}  # "Could not read existing settings, starting fresh"
     hooks = s.setdefault("hooks", {})
     cmd = f'"node" "{hook}"'  # native separators, like upstream
     for ev in EVENTS:
@@ -45,14 +65,54 @@ if not already():
                                                        for h in g.get("hooks", []))]
         lst.append({"hooks": [{"type": "command", "command": cmd, "timeout": 2}]})
         hooks[ev] = lst
+    settings_p.parent.mkdir(parents=True, exist_ok=True)
     settings_p.write_text(json.dumps(s, indent=2) + "\n", encoding="utf-8")
+
+
+if os.environ.get("FAKE_AF_CLOBBER") == "1":
+    configure(start_fresh=True)
+elif not already():
+    configure()
 
 port = 3001
 if "--port" in sys.argv:
     port = int(sys.argv[sys.argv.index("--port") + 1])
 
 
-def serve(sock):
+class UI(BaseHTTPRequestHandler):
+    def do_GET(self):
+        if self.path == "/events":
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            self.wfile.write(b'data: {"type":"agent-event","tool":"Read","args":"People/Sam.md"}\n\n')
+            self.wfile.flush()
+            return
+        if self.path in ("/", "/index.html"):
+            body = b"<html><body>WAITING FOR AGENT SESSION</body></html>"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        self.send_response(404)
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
+    def log_message(self, *a):
+        pass
+
+
+ui = ThreadingHTTPServer(("127.0.0.1", port), UI)
+threading.Thread(target=ui.serve_forever, daemon=True).start()
+
+hk = socket.socket()
+hk.bind(("127.0.0.1", 0))
+hk.listen(5)
+
+
+def accept_forever(sock):
     while True:
         try:
             c, _ = sock.accept()
@@ -61,14 +121,7 @@ def serve(sock):
             return
 
 
-ui = socket.socket()
-ui.bind(("127.0.0.1", port))
-ui.listen(5)
-hk = socket.socket()
-hk.bind(("127.0.0.1", 0))
-hk.listen(5)
-for s in (ui, hk):
-    threading.Thread(target=serve, args=(s,), daemon=True).start()
+threading.Thread(target=accept_forever, args=(hk,), daemon=True).start()
 
 ws = os.path.realpath(os.getcwd())
 code = hashlib.sha256(ws.encode()).hexdigest()[:16]

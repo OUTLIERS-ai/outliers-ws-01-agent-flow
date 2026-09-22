@@ -4,14 +4,23 @@ It runs from the folder saved in config.json (the folder that contains your
 vaults), because the server only receives events from Claude Code sessions
 running inside the folder it was started from.
 
+Before every start it checks your Claude Code settings.json. agent-flow runs its
+own setup each time it starts, and if it cannot read that file (a trailing comma,
+an invisible byte-order mark) it replaces the whole file with only its hooks. So
+if the file is not safe, start.py does NOT start agent-flow and says why, on screen
+and in logs/start.log. guard.py then watches the file for the first minute
+and puts it back if agent-flow changed it anyway.
+
     python start.py              # start it in the background, then print the address
     python start.py --stop       # stop the server this kit started
-    python start.py --status     # say whether it is running
+    python start.py --status     # say whether it is running (and why not, if it refused)
     python start.py --foreground # run and wait (used by the Mac logon job)
 """
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
+import json
 import os
 import subprocess
 import sys
@@ -20,6 +29,8 @@ from pathlib import Path
 
 import cleanup
 import common
+
+REFUSED = "[start.py] REFUSED:"
 
 
 def servers_for(workspace: str) -> list[dict]:
@@ -32,9 +43,27 @@ def pid_file() -> Path:
     return common.logs_dir() / "agent-flow.pid"
 
 
-def launch(workspace: str, package: str, port: int, foreground: bool = False,
-           env_extra: dict | None = None) -> subprocess.Popen:
-    cmd = common.npx_command(package) + ["--no-open", "--port", str(port)]
+def log_line(msg: str) -> None:
+    common.logs_dir().mkdir(parents=True, exist_ok=True)
+    stamp = _dt.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with open(common.logs_dir() / "start.log", "a", encoding="utf-8") as fh:
+        fh.write(f"[{stamp}] {msg}\n")
+
+
+def last_refusal() -> str | None:
+    p = common.logs_dir() / "start.log"  # the kit's own lines; agent-flow's own output is agent-flow.log
+    if not p.exists():
+        return None
+    last = None
+    for line in p.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]:
+        if REFUSED in line:
+            last = line
+        elif "[guard] page ready" in line:
+            last = None
+    return last
+
+
+def _popen(cmd, workspace, env_extra, foreground):
     env = dict(os.environ, **common.QUIET_ENV, **(env_extra or {}))
     common.logs_dir().mkdir(parents=True, exist_ok=True)
     log = open(common.logs_dir() / "agent-flow.log", "ab")
@@ -43,8 +72,24 @@ def launch(workspace: str, package: str, port: int, foreground: bool = False,
         kwargs["creationflags"] = common.NO_WINDOW | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
     else:
         kwargs["start_new_session"] = not foreground
-    proc = subprocess.Popen(cmd, **kwargs)
-    common.atomic_write_text(pid_file(), str(proc.pid))
+    return subprocess.Popen(cmd, **kwargs)
+
+
+def launch_raw(workspace: str, package: str, port: int, env_extra: dict | None = None) -> subprocess.Popen:
+    """agent-flow itself, with no guard. Only install.py uses this, inside a throwaway home."""
+    return _popen(common.npx_command(package) + ["--no-open", "--port", str(port)], workspace, env_extra, False)
+
+
+def launch(workspace: str, package: str, port: int, foreground: bool = False,
+           wait_s: float = 180.0) -> subprocess.Popen:
+    """agent-flow behind guard.py. Records the guard's process number AND start time,
+    so --stop can never mistake another program for it after a restart."""
+    cmd = [sys.executable, str(Path(__file__).resolve().parent / "guard.py"), "--kit-dir", str(common.KIT_DIR),
+           "--workspace", workspace,
+           "--package", package, "--port", str(port), "--wait", str(wait_s)]
+    proc = _popen(cmd, workspace, None, foreground)
+    record = {"pid": proc.pid, "started": common.process_start_time(proc.pid)}
+    common.atomic_write_text(pid_file(), json.dumps(record))
     return proc
 
 
@@ -55,15 +100,24 @@ def start(workspace: str, package: str, port: int, wait_s: float, foreground: bo
 
     if not Path(workspace).is_dir():
         say(f"The watch folder does not exist: {workspace}")
+        log_line(f"{REFUSED} the watch folder does not exist: {workspace}")
         return 2
+    problem = common.settings_problem()
+    if problem:
+        log_line(f"{REFUSED} {problem}")
+        say("agent-flow was NOT started, to protect your Claude Code settings.")
+        say(problem)
+        return 5
     cleanup.run(quiet=True)
-    if servers_for(workspace):
+    if servers_for(workspace) and common.port_answers(port):
         say(f"Already running for {workspace}. Open http://127.0.0.1:{port}")
         return 0
     if common.port_answers(port):
-        say(f"Port {port} is already in use by another program. Pick another with --port.")
+        say(f"Port {port} is already in use by another program. "
+            f"Pick another with:  python install.py --port {port + 1}   then:  python start.py")
+        log_line(f"{REFUSED} port {port} is already in use by another program")
         return 3
-    proc = launch(workspace, package, port, foreground)
+    proc = launch(workspace, package, port, foreground, wait_s)
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if servers_for(workspace) and common.port_answers(port):
@@ -83,29 +137,46 @@ def start(workspace: str, package: str, port: int, wait_s: float, foreground: bo
     return 0
 
 
-def stop(workspace: str | None, quiet: bool = False) -> int:
-    stopped = 0
-    targets = servers_for(workspace) if workspace else []
-    for info in targets:
-        common.kill_tree(info["pid"])
-        stopped += 1
+def our_process() -> int | None:
+    """The guard process start.py launched, if it is still the same process. A process
+    number alone is not enough: after a restart Windows can give it to any program."""
     pf = pid_file()
-    if pf.exists():
-        try:
-            pid = int(pf.read_text().strip())
-            if common.pid_alive(pid):
-                common.kill_tree(pid)
-        except ValueError:
-            pass
-        pf.unlink()
+    if not pf.exists():
+        return None
+    try:
+        rec = json.loads(pf.read_text(encoding="utf-8"))
+        pid, started = int(rec["pid"]), rec["started"]
+    except (ValueError, KeyError, TypeError):
+        return None  # old plain-number file: cannot prove it is ours, so leave it alone
+    if started is None or not common.pid_alive(pid):
+        return None
+    return pid if common.process_start_time(pid) == started else None
+
+
+def stop(workspace: str | None, quiet: bool = False) -> int:
+    killed = 0
+    targets = servers_for(workspace) if workspace else []
+    ours = our_process()
+    if ours is not None:
+        common.kill_tree(ours)
+        killed += 1
+    for info in targets:
+        if common.pid_alive(info["pid"]):
+            common.kill_tree(info["pid"])
+            killed += 1
+    try:
+        pid_file().unlink()
+    except OSError:
+        pass
     time.sleep(0.5)
     for info in targets:
         try:
             info["file"].unlink()
         except OSError:
             pass
+    cleanup.run(quiet=True)
     if not quiet:
-        print(f"Stopped {stopped} agent-flow server(s).")
+        print("Stopped agent-flow." if killed else "agent-flow was not running. Nothing to stop.")
     return 0
 
 
@@ -128,9 +199,13 @@ def main(argv=None) -> int:
     if args.stop:
         return stop(args.watch_folder, args.quiet)
     if args.status:
-        live = servers_for(args.watch_folder)
+        live = servers_for(args.watch_folder) and common.port_answers(args.port)
         print(f"{'Running' if live else 'Not running'} for {args.watch_folder}"
               + (f" - http://127.0.0.1:{args.port}" if live else ""))
+        if not live:
+            why = last_refusal()
+            if why:
+                print("Last start was refused: " + why.split(REFUSED, 1)[1].strip())
         return 0 if live else 1
     return start(args.watch_folder, args.package, args.port, args.wait, args.foreground, args.quiet)
 

@@ -201,7 +201,7 @@ def prime_hook_script(package: str, wait_s: float) -> bool:
           f"(can take up to {int(wait_s)} seconds)...")
     env_extra = {"HOME": str(fake_home), "USERPROFILE": str(fake_home)}
     try:
-        proc = starter.launch(str(work), package, 3099, env_extra=env_extra)
+        proc = starter.launch_raw(str(work), package, 3099, env_extra=env_extra)
         deadline = time.time() + wait_s
         while time.time() < deadline and not made.exists():
             if proc.poll() is not None:
@@ -228,35 +228,58 @@ def prime_hook_script(package: str, wait_s: float) -> bool:
 # ---------------------------------------------------------------- settings
 def apply_hooks(node_path: str | None) -> dict:
     path = common.settings_path()
-    before_text = path.read_text(encoding="utf-8-sig") if path.exists() else None
+    raw = path.read_bytes() if path.exists() else None
     settings = common.read_settings(path)
     before = common.count_agent_flow(settings)
     new, removed = common.install_agent_flow(settings, common.hook_command(node_path))
-    changed = new != settings
+    # A byte-order mark makes agent-flow throw the whole file away at its next start,
+    # so it is removed here too (after the same backup), even when nothing else changes.
+    had_bom = bool(raw and raw.startswith(common.BOM))
+    changed = new != settings or had_bom
     bak = None
     if changed:
         bak = common.backup(path, "agent-flow")
         common.atomic_write_text(path, common.dump_settings(new), common.detect_eol(path))
     return {"path": path, "before": before, "after": common.count_agent_flow(new),
-            "removed": removed, "changed": changed, "backup": bak, "existed": before_text is not None}
+            "removed": removed, "changed": changed, "backup": bak, "existed": raw is not None,
+            "had_bom": had_bom}
+
+
+def original_bytes_for(path, wanted: dict) -> bytes | None:
+    """The first install's backup, if taking our hooks out gives exactly the settings
+    it holds. Then an uninstall can give back the very same bytes (indentation, line
+    endings, byte-order mark) instead of a reformatted copy."""
+    for bak in sorted(path.parent.glob(path.name + ".bak-agent-flow-2*"), reverse=True):
+        try:
+            if common.read_settings(bak) == wanted:
+                return bak.read_bytes()
+        except (OSError, ValueError, UnicodeDecodeError):
+            continue
+    return None
 
 
 def remove_hooks() -> dict:
     path = common.settings_path()
     if not path.exists():
-        return {"path": path, "removed": 0, "backup": None}
+        return {"path": path, "removed": 0, "backup": None, "exact": False}
     settings = common.read_settings(path)
     new, removed = common.remove_agent_flow(settings)
     bak = None
+    exact = False
     if removed:
         bak = common.backup(path, "agent-flow-uninstall")
-        common.atomic_write_text(path, common.dump_settings(new), common.detect_eol(path))
-    return {"path": path, "removed": removed, "backup": bak}
+        original = original_bytes_for(path, new)
+        if original is not None:
+            common.atomic_write_bytes(path, original)
+            exact = True
+        else:
+            common.atomic_write_text(path, common.dump_settings(new), common.detect_eol(path))
+    return {"path": path, "removed": removed, "backup": bak, "exact": exact}
 
 
 # ---------------------------------------------------------------- main
 def refuse(msg: str) -> int:
-    print("\nSTOPPED - nothing was changed.\n" + msg)
+    print("\nSTOPPED - your Claude Code settings.json was not changed.\n" + msg)
     return 2
 
 
@@ -283,6 +306,10 @@ def do_install(args) -> int:
     print(f"Node.js {'.'.join(map(str, ver))} found.")
 
     cfg = common.load_config()
+    # Is a server from an earlier install running? If the watch folder or port changes
+    # it has to be moved, or it keeps the old folder and blocks the port.
+    old_watch, old_port = cfg.get("watch_folder"), int(cfg.get("port") or common.UI_PORT)
+    was_running = bool(starter.our_process() or (old_watch and starter.servers_for(old_watch)))
     sb_guess, crm_guess = guess_paths()
     sb = args.second_brain or cfg.get("second_brain") or sb_guess
     crm = args.crm or cfg.get("crm") or crm_guess
@@ -308,6 +335,12 @@ def do_install(args) -> int:
         "port": args.port or cfg.get("port") or common.UI_PORT,
         "autostart": not args.no_autostart,
     }
+    moved = was_running and (common.norm_path(old_watch or "") != common.norm_path(watch)
+                             or old_port != int(new_cfg["port"]))
+    if moved:
+        print(f"Stopping the server that runs for {old_watch} on port {old_port}; "
+              "it starts again with the new settings at the end.")
+        starter.stop(old_watch, quiet=True)
     if new_cfg != cfg:
         common.atomic_write_text(common.config_path(), json.dumps(new_cfg, indent=2) + "\n")
         print(f"Saved settings to {common.config_path()}")
@@ -320,8 +353,12 @@ def do_install(args) -> int:
 
     try:
         res = apply_hooks(args.node_path)
-    except (ValueError, json.JSONDecodeError) as exc:
-        return refuse(f"Could not read {common.settings_path()}: {exc}\nFix the file, then run again.")
+    except (ValueError, UnicodeDecodeError) as exc:
+        return refuse(f"Could not read {common.settings_path()}: {common.json_error_in_words(exc)}\n"
+                      "Open the file at that line (often a comma after the last item), fix it, then run again.")
+    except (AttributeError, TypeError):
+        return refuse(f"{common.settings_path()} has a 'hooks' block in a shape this installer does not "
+                      "recognise (for example an event that is not a list).\nFix it by hand, then run again.")
     print(f"\nClaude Code settings: {res['path']}")
     print(f"{'Event':<22}{'before':>8}{'after':>8}")
     for ev in common.EVENTS:
@@ -335,9 +372,20 @@ def do_install(args) -> int:
               "another copy each time it starts.")
     else:
         print("Already correct: 1 copy per event. Nothing changed.")
+    if res.get("had_bom"):
+        print("Removed an invisible byte-order mark from the start of settings.json "
+              "(agent-flow cannot read a file that has one).")
 
     if args.no_autostart:
-        print("\nNo logon launcher (you chose --no-autostart). Start it by hand with: python start.py")
+        lp = launcher_path(args.startup_dir)
+        if lp.exists():
+            if common.IS_MAC:
+                subprocess.run(["launchctl", "unload", str(lp)], capture_output=True)
+            lp.unlink()
+            print(f"\nRemoved the logon launcher (you chose --no-autostart): {lp}")
+        else:
+            print("\nNo logon launcher (you chose --no-autostart).")
+        print("Start it by hand with: python start.py")
     else:
         lp = launcher_path(args.startup_dir)
         text = launcher_text()
@@ -350,11 +398,17 @@ def do_install(args) -> int:
                 print(f"It runs at your next login. To start it now: launchctl load \"{lp}\"")
     print("Usage tracking: off (AGENT_FLOW_TELEMETRY=false and DO_NOT_TRACK=1 are set by the launcher).")
 
-    if args.start_now:
+    running_now = False
+    if args.start_now or moved:
         print()
-        starter.start(watch, new_cfg["package"], int(new_cfg["port"]), args.wait, False, False)
-    print(f"\nDone. Open http://127.0.0.1:{new_cfg['port']} once it is running, then start a NEW "
-          "Claude Code session inside the watch folder.")
+        running_now = starter.start(watch, new_cfg["package"], int(new_cfg["port"]), args.wait, False, False) == 0
+    if running_now:
+        print(f"\nDone. Open http://127.0.0.1:{new_cfg['port']} and start a NEW "
+              "Claude Code session inside the watch folder.")
+    else:
+        print("\nDone. Start it now with:  python start.py")
+        print(f"Then open http://127.0.0.1:{new_cfg['port']} and start a NEW Claude Code session "
+              "inside the watch folder.")
     print("Check your hooks any time with:  python check_hooks.py")
     return 0
 
@@ -365,8 +419,17 @@ def do_uninstall(args) -> int:
     watch = args.watch_folder or cfg.get("watch_folder")
     if watch:
         starter.stop(watch, quiet=False)
-    res = remove_hooks()
+    try:
+        res = remove_hooks()
+    except (ValueError, UnicodeDecodeError) as exc:
+        return refuse(f"Could not read {common.settings_path()}: {common.json_error_in_words(exc)}\n"
+                      "Fix the file, then run again.")
+    except (AttributeError, TypeError):
+        return refuse(f"{common.settings_path()} has a 'hooks' block in a shape this installer does not "
+                      "recognise. Fix it by hand, then run again.")
     print(f"Removed {res['removed']} agent-flow hook entries from {res['path']}")
+    if res.get("exact"):
+        print("settings.json is now byte-for-byte what it was before the first install.")
     if res["backup"]:
         print(f"Backup taken first: {res['backup']}")
     lp = launcher_path(args.startup_dir)
@@ -377,8 +440,8 @@ def do_uninstall(args) -> int:
         print(f"Removed logon launcher: {lp}")
     else:
         print("No logon launcher found.")
-    print(f"Left in place (upstream's own files, safe to delete by hand): {common.discovery_dir()} "
-          f"and {common.home() / '.agent-flow'}")
+    print(f"Left in place (agent-flow's own files, safe to delete by hand): {common.discovery_dir()}"
+          + (f" and {common.home() / '.agent-flow'}" if (common.home() / '.agent-flow').exists() else ""))
     return 0
 
 
