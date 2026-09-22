@@ -186,7 +186,8 @@ def test_check_hooks_explains_a_broken_file(temp_home, capsys):
     rc = check_hooks.main([])
     out = capsys.readouterr().out
     assert rc == 2
-    assert "not valid JSON" in out and "line 2" in out
+    assert "cannot be read" in out and "line 2" in out
+    assert "comma after the last item" in out
 
 
 def test_odd_settings_shape_stops_cleanly(vaults, temp_home, capsys):

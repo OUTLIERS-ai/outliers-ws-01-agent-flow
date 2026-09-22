@@ -157,14 +157,35 @@ def read_settings(path: Path | None = None) -> dict:
         return {}
     data = strict_loads(text)
     if not isinstance(data, dict):
-        raise ValueError(f"{path} is not a JSON object")
+        raise ValueError(f"{path} does not start with {{ and end with }}, so it is not a settings file")
     return data
 
 
+# Python's JSON messages, said in plain words for members who are not programmers.
+_JSON_WORDS = [
+    ("Illegal trailing comma before end of object", "there is a comma after the last item in a block"),
+    ("Illegal trailing comma before end of array", "there is a comma after the last item in a list"),
+    ("Expecting ',' delimiter", "a comma is missing between 2 items"),
+    ("Expecting ':' delimiter", "a colon is missing after a name"),
+    ("Expecting property name enclosed in double quotes",
+     "a name is missing its double quotes, or there is a comma after the last item in a block"),
+    ("Expecting value", "a value is missing or mistyped"),
+    ("Unterminated string", "some text is missing its closing double quote"),
+    ("Extra data", "there is extra text after the file's last closing }"),
+    ("Invalid control character", "there is a tab or a line break inside some text in double quotes"),
+    ("Invalid \\escape", "a backslash inside double quotes must be written twice, as \\\\"),
+]
+
+
 def json_error_in_words(exc: Exception) -> str:
-    """'line 10, column 26: Expecting ',' delimiter' instead of a Python error dump."""
+    """'line 10, column 26: a comma is missing between 2 items' instead of a Python error dump."""
     if isinstance(exc, json.JSONDecodeError):
-        return f"line {exc.lineno}, column {exc.colno}: {exc.msg}"
+        words = exc.msg
+        for start, plain in _JSON_WORDS:
+            if exc.msg.startswith(start):
+                words = plain
+                break
+        return f"line {exc.lineno}, column {exc.colno}: {words}"
     return str(exc)
 
 
@@ -202,11 +223,11 @@ def settings_problem() -> str | None:
     except UnicodeDecodeError:
         return f"{path} is not plain UTF-8 text. Fix it, then run: python install.py"
     except ValueError as exc:
-        return (f"{path} is not valid JSON ({json_error_in_words(exc)}). agent-flow would replace the "
-                "whole file. Open it at that line (often a comma after the last item), save, "
-                "then run: python check_hooks.py")
+        return (f"{path} cannot be read ({json_error_in_words(exc)}). agent-flow would replace the "
+                "whole file. Open it at that line, fix it and save, then run: python check_hooks.py")
     if not isinstance(data, dict):
-        return f"{path} is not a JSON object. Fix it, then run: python install.py"
+        return (f"{path} does not start with {{ and end with }}, so it is not a settings file. "
+                "Fix it, then run: python install.py")
     try:
         counts = count_agent_flow(data)
     except (AttributeError, TypeError):

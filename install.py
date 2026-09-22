@@ -297,7 +297,7 @@ def node_help() -> str:
 
 
 def do_install(args) -> int:
-    print("agent-flow installer (Outliers workspace, piece 1)\n")
+    print("agent-flow installer (Outliers Accelerator, guide 1 of 4)\n")
     ver = common.node_version() if not os.environ.get("AGENT_FLOW_NPX_CMD") else (99, 0, 0)
     if ver is None:
         return refuse("Node.js was not found.\n" + node_help())
@@ -382,21 +382,21 @@ def do_install(args) -> int:
             if common.IS_MAC:
                 subprocess.run(["launchctl", "unload", str(lp)], capture_output=True)
             lp.unlink()
-            print(f"\nRemoved the logon launcher (you chose --no-autostart): {lp}")
+            print(f"\nRemoved the file that starts agent-flow at logon (you chose --no-autostart): {lp}")
         else:
-            print("\nNo logon launcher (you chose --no-autostart).")
+            print("\nagent-flow will not start at logon (you chose --no-autostart).")
         print("Start it by hand with: python start.py")
     else:
         lp = launcher_path(args.startup_dir)
         text = launcher_text()
         if lp.exists() and lp.read_text(encoding="utf-8") == text:
-            print(f"\nLogon launcher already in place: {lp}")
+            print(f"\nFile that starts agent-flow at logon, already in place: {lp}")
         else:
             common.atomic_write_text(lp, text)
-            print(f"\nLogon launcher written: {lp}")
+            print(f"\nFile that starts agent-flow at logon, written: {lp}")
             if common.IS_MAC:
                 print(f"It runs at your next login. To start it now: launchctl load \"{lp}\"")
-    print("Usage tracking: off (AGENT_FLOW_TELEMETRY=false and DO_NOT_TRACK=1 are set by the launcher).")
+    print("Usage tracking: off (AGENT_FLOW_TELEMETRY=false and DO_NOT_TRACK=1 are set by that file).")
 
     running_now = False
     if args.start_now or moved:
@@ -437,9 +437,9 @@ def do_uninstall(args) -> int:
         if common.IS_MAC:
             subprocess.run(["launchctl", "unload", str(lp)], capture_output=True)
         lp.unlink()
-        print(f"Removed logon launcher: {lp}")
+        print(f"Removed the file that starts agent-flow at logon: {lp}")
     else:
-        print("No logon launcher found.")
+        print("No file that starts agent-flow at logon was found.")
     print(f"Left in place (agent-flow's own files, safe to delete by hand): {common.discovery_dir()}"
           + (f" and {common.home() / '.agent-flow'}" if (common.home() / '.agent-flow').exists() else ""))
     return 0

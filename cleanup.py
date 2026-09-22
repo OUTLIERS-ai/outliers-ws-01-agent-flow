@@ -39,7 +39,7 @@ def run(dry_run: bool = False, quiet: bool = False) -> dict:
     if not quiet:
         where = common.discovery_dir()
         print(f"Registration folder: {where}")
-        print(f"Found {len(files)} registration file(s): {len(kept)} running, {len(removed)} stale.")
+        print(f"Found {len(files)} registration file(s): {len(kept)} running, {len(removed)} left over from stopped servers.")
         for info in kept:
             print(f"  KEEP    {info['file'].name}  port {info['port']}  watching {info['workspace']}")
         verb = "WOULD REMOVE" if dry_run else "REMOVED"

@@ -63,7 +63,7 @@ def main(argv=None) -> int:
         settings = common.read_settings(path)
     except (ValueError, UnicodeDecodeError) as exc:
         print(f"Settings file: {path}")
-        print(f"RESULT: PROBLEM - settings.json is not valid JSON ({common.json_error_in_words(exc)}).")
+        print(f"RESULT: PROBLEM - settings.json cannot be read ({common.json_error_in_words(exc)}).")
         print("Open the file at that line and fix it. The usual cause is a comma after the last item "
               "in a list or block. Claude Code and agent-flow cannot read it until then, and start.py "
               "will not start agent-flow.")
