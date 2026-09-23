@@ -80,6 +80,8 @@ agent-flow is 1 of 4 screens Ashley built around his agents. The other 3 each ha
 
 Claude Code lets you register a **hook**: a command it runs by itself every time a given event happens, such as "a tool is about to be used" or "a subagent has started". agent-flow registers a small script, `hook.js`, on 9 kinds of event. Each time 1 of them happens, Claude Code runs `hook.js` and hands it a description of the event. The script looks in the folder `<your home>/.claude/agent-flow/` for small files that say where the agent-flow server (the agent-flow program running in the background, which draws the page) is listening, and sends the event there. The server updates its picture and your browser redraws.
 
+The hook is only half of it: the server also reads Claude Code's own session transcript files, in `<your home>/.claude/projects/`, and that is where the tab title, the conversation in the Chat panel, the token counts and every subagent come from. The second hexagon and the line to it are drawn from the line in that transcript where the session calls the Task tool to start the subagent, not from the SubagentStart event, which only records a name.
+
 ![How 1 event travels. Step 4, guard.py (our program between agent-flow and your browser), is our addition from 2026-09-22: it refuses requests from other websites. The security section below explains why.](img/event-path.png)
 
 ### 2026-06-12: install day
@@ -145,8 +147,8 @@ Before this guide went out, the kit was tested by someone trying to break it, us
 |---|---|---|
 | Cost | Free, with its code open to read. Uses no Claude tokens itself. | Every tool call starts Node.js once, to run `hook.js` (it ends within 1.5 seconds and never makes Claude wait). It does this even when the server is off, until you uninstall. |
 | Setup | About 1 minute with our installer, plus the first download. | Needs Node.js, which most people do not have yet. |
-| What you see | Subagents appear the moment they start; every tool call is a card; Review replays a run. | 1 session per tab. There is no single screen with every session: our 2026-06-12 attempt to add that screen failed. FleetView (piece 2 of 4) is that screen. |
-| Accuracy | Tool calls and subagents come straight from Claude Code's own events. | Token counts and costs are estimates. On Ashley's PC they disagreed with FleetView (the session-and-cost screen in piece 2 of 4) for the same session. |
+| What you see | Subagents appear within a second, read from the session transcript; every tool call is a card; Review replays a run. | 1 session per tab. There is no single screen with every session: our 2026-06-12 attempt to add that screen failed. FleetView (piece 2 of 4) is that screen. |
+| Accuracy | Tool calls come straight from Claude Code's own events; subagents, the conversation and the token counts are read from Claude Code's session transcript files. | Token counts and costs are estimates. On Ashley's PC they disagreed with FleetView (the session-and-cost screen in piece 2 of 4) for the same session. |
 | Privacy | The page only listens on your own computer, and guard.py (our program between agent-flow and your browser) refuses requests addressed to anything but your own computer. | Tab titles show the first words of your prompts, so take care when screen-sharing. Usage tracking is on unless switched off (our start-at-logon file switches it off). A website that guesses a port number can still draw fake sessions on your screen. |
 | Safety | Our kit will not start agent-flow on a settings file it would wipe, and puts the file back if it changes anyway. | agent-flow's own set-up still runs at every start; our checks run before and after it; they do not stop it running. |
 | Windows | Our kit fixes the 2 known Windows faults: the start folder, and leftover registration files that swallow events. Closing agent-flow by force (from Task Manager, or a crash) used to leave a second server running and sending the same events twice; `cleanup.py` now counts servers rather than folders, ends the extra one, and says so. | agent-flow's own registration files are still written by agent-flow, so a server closed by force leaves its file behind until the next `python start.py` or `python cleanup.py`. |
@@ -189,7 +191,7 @@ git clone https://github.com/OUTLIERS-ai/outliers-ws-01-agent-flow; cd outliers-
 ![What a successful install prints, retaken 2026-09-23 with the 2 version checks it now runs first. Paths shortened to C:\Users\<you>; the demo ran in a made-up home folder, and "Demo CRM" is an invented vault.](img/install-output.png)
 
 6. Start it now: `python start.py`. From now on it also starts by itself, with no window, each time you log in.
-7. Open http://127.0.0.1:3001. You see "Waiting for agent session".
+7. Open http://127.0.0.1:3001. In the middle of the page you see "WAITING FOR AGENT SESSION" in capitals, and under it "Start a Claude Code session to see activity".
 
 ![The page before any session has started.](img/agentflow-waiting.png)
 
@@ -207,7 +209,8 @@ Every command below runs inside the downloaded folder. In a new terminal, type `
 
 - **Leave the page open in a browser tab** while you work. Switch tabs at the top to follow a different session.
 - **Press Review** on the bottom bar to replay a run that has finished.
-- **The Files, Chat, Cost and Timeline buttons** top right open side panels: which files were touched, the conversation, the estimated cost, and a timeline of every call.
+- **The Files, Chat and Timeline buttons** top right open side panels: which files were touched, the conversation, and a timeline of every call.
+- **The $Cost button** beside them opens no panel. It writes an estimated price above each hexagon and draws a small cost box in the corner of the picture, split by agent and by tool. Nothing appears until a session has used enough tokens to be worth a price.
 - **Check your hooks once a week:** `python check_hooks.py`. Anything other than 1 per event means something else has been writing to your settings.
 - **If the page goes quiet:** run `python start.py --stop`, then `python start.py`, then open a new Claude Code session.
 - **If a start fails,** it now tells you why in 1 sentence on screen: the port was taken, the internet is not reachable and agent-flow is not saved on this computer yet, Node.js is missing or too old, or the package name in `config.json` is wrong. `python start.py --status` repeats that sentence later.
@@ -326,7 +329,7 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 
 **Worth knowing**
 
-- If you set `CLAUDE_CONFIG_DIR` (a setting that tells Claude Code to keep its settings in a different folder), the installer uses that folder. agent-flow itself always uses `<home>/.claude`.
+- If you set `CLAUDE_CONFIG_DIR` (a setting that tells Claude Code to keep its settings in a different folder), the installer uses that folder. agent-flow itself always uses `<home>/.claude`, so it will not find your session transcripts and you get a half-drawn page. See the "Half a page" row of "When it goes wrong".
 - agent-flow also watches OpenAI Codex (OpenAI's coding assistant) unless the environment variable `AGENT_FLOW_RUNTIME=claude` is set. It does no harm if you do not use Codex.
 - The kit's automatic self-checks run with `python -m pytest -q`. They use a made-up home folder and a fake agent-flow, so your real settings are never touched. 4 more run against the real agent-flow if you first set the environment variable `AGENT_FLOW_REAL=1`.
 
@@ -334,7 +337,8 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 
 | What you see | Why | Fix |
 |---|---|---|
-| The page says "Waiting for agent session" forever | The session was already open when the server started, or it runs outside the watch folder. | Open a NEW session inside the watch folder. Check the folder with `python start.py --status` and `config.json`. |
+| The page says "WAITING FOR AGENT SESSION" forever | The session was already open when the server started, or it runs outside the watch folder. | Open a NEW session inside the watch folder. Check the folder with `python start.py --status` and `config.json`. |
+| Half a page: tool call cards appear, but no subagent hexagons, the tab is titled `Session` and a number instead of your prompt, and the token count stays at 0 | You have set `CLAUDE_CONFIG_DIR` to keep Claude Code's folder somewhere other than `<home>/.claude`. The hook still reaches agent-flow, but agent-flow reads session transcripts only from `<home>/.claude/projects/`, and yours are not there. | Start Claude Code without `CLAUDE_CONFIG_DIR`, or move the folder back to `<home>/.claude`. agent-flow cannot be pointed anywhere else; the folder is written into its code. |
 | Still nothing after a new session | A leftover file from an old agent-flow server, pointing at a folder deeper inside your watch folder, is taking the events (Windows only). | `python cleanup.py`, then `python start.py --stop` and `python start.py`, then a new session. |
 | "agent-flow was NOT started, to protect your Claude Code settings" | settings.json has a typing error, or an invisible marker at its very start that some editors add (a byte-order mark); agent-flow would have replaced the whole file. | Error with a line number: open settings.json at that line, fix it (a comma after the last item is the usual cause), save. Byte-order mark: run `python install.py`, which removes it after a backup. Then `python start.py`. |
 | The page never loads after logging in | The settings check refused to start agent-flow at logon, or the start failed, and nothing was on screen to tell you. | `python start.py --status` prints the 1-sentence reason; fix as it says, then `python start.py`. |
