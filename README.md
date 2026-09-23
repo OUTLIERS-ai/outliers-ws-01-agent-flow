@@ -22,7 +22,7 @@ This folder does not contain agent-flow. It contains the safe way to install and
 | `check_hooks.py` | Counts every hook on every Claude Code event and flags any command registered twice. `--fix` keeps 1 of each after a backup. |
 | `cleanup.py` | Deletes stale server registration files, the Windows fault that silently stops events arriving, and ends a second server left watching the same folder. |
 | `common.py` | Shared code for the scripts above. |
-| `tests/` | `python -m pytest -q`. They use a temporary home folder and a stand-in for agent-flow; they never touch your real setup. Set `AGENT_FLOW_REAL=1` to also run 4 tests against the real npm package. |
+| `tests/` | 45 checks, run with `python -m pytest -q`. They use a temporary home folder and a stand-in for agent-flow; they never touch your real setup. Set `AGENT_FLOW_REAL=1` to also run 4 checks against the real npm package; without it those 4 are skipped. Measured from a fresh copy on 2026-09-23: 45 passed, 4 skipped. |
 | `guide/GUIDE.md` | The full guide: how it was built, what went wrong, how to fit it to your own system. |
 
 ## What you need
