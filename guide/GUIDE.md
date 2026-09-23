@@ -48,6 +48,26 @@ When you run agents, most of the work is invisible. You type a request and later
 
 agent-flow only reads what your agents do; it cannot change it.
 
+### What it is for
+
+Watching, as it happens, which subagents a Claude Code session starts and which files and commands it uses.
+
+### Works well when
+
+- **You are building an agent.** Its instructions say it calls 3 specialists. You run it with this screen open and see which specialists it really starts, in what order, and every file it really reads.
+- **A session is slow or costing more than you expected.** You see the moment it starts 5 subagents at once, or reads the same file 4 times.
+- **You are recording your screen** for a video, a client or a session. Agents handing work to each other is understood in 5 seconds when it is watched, and not at all when it is described.
+- **You have just changed an agent's instructions** and want to watch the next run rather than read a summary of it afterwards.
+- **You want to know why a session has gone quiet:** waiting on 1 slow command, or working through 6 subagents.
+
+### Does not work well when
+
+- **You want a record afterwards.** agent-flow keeps nothing. The Review button replays only what the running server still has in memory; stop the server and it is gone. For a written trail of what each agent did, use ProjectForge, piece 3 of 4.
+- **You want every session on 1 screen.** It draws 1 session per tab and you click between them. Ashley's attempt to merge them failed on 2026-06-12 (see How we built it). FleetView, piece 2 of 4, is the screen that does this.
+- **You are screen-sharing or recording for other people.** Each tab is titled with the opening words of that session's prompt, and the cards beside each agent show your file names and commands. Check the tabs before you share.
+- **You want to leave it running all day unwatched.** The separate port that receives events accepts made-up events from any web page that guesses the port number. That is agent-flow's own code, not ours, and it cannot be fixed from outside the package. Stop it when you are not watching: `python start.py --stop`.
+- **You do not want Node.js on your computer.** Then do not install this piece. agent-flow needs Node.js, and once the hook is installed every tool call starts Node.js once, even when the screen is off, until you uninstall.
+
 ## How we built it
 
 This is how Ashley set agent-flow up on his own Windows PC, what broke, and what we kept. Every date and count below was read from his files, settings backups and logs on 2026-09-22.
@@ -201,6 +221,8 @@ Every command below runs inside the downloaded folder. In a new terminal, type `
 ![A subagent at work: each card is 1 tool call it made, here reading notes and listing a folder.](img/agentflow-subagent-working.png)
 
 ## Fit it to your own AI system
+
+This download is a starting point, not a finished product. It is yours now: change it, and keep changing it until it matches how you work. Ashley did exactly that with his own copy. He tried patching agent-flow to put every session in 1 tab, looked at the screen, saw 6 sessions stacked on the same spot, and threw the patch away. He worked out the 2 Windows fixes himself: start the server from the folder that sits above all your vaults, or it never hears your sessions; and delete the leftover registration files, or events stop arriving with no warning. He wrote the hidden start-at-logon file with usage tracking switched off. He added a count of hooks after his own settings file reached 12 copies of the same hook on every event. None of that came in the box, and all of it is in what you have downloaded.
 
 Each idea below comes with a prompt you can paste into Claude Code, opened in the `outliers-ws-01-agent-flow` folder unless it says otherwise.
 
