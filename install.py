@@ -314,8 +314,9 @@ def python_help() -> str:
     return (f"This kit needs Python {want} or newer. This terminal is running Python {have}.\n"
             "Python 3.10 gets security fixes only until 2026-10-31, and older versions get none.\n"
             "Install a current Python from https://python.org (on a Mac, python.org or "
-            "`brew install python`), open a NEW terminal, check with:  python --version\n"
-            "(on a Mac:  python3 --version) and run install.py again.")
+            "`brew install python`), open a NEW terminal, check with:  "
+            + ("python3 --version" if common.IS_MAC else "python --version\n(on a Mac:  python3 --version)")
+            + " and run install.py again.")
 
 
 def want_autostart(args, cfg: dict) -> bool:
@@ -423,9 +424,9 @@ def do_install(args) -> int:
             print(f"\nRemoved the file that starts agent-flow when the computer starts ({how}): {lp}")
         else:
             print(f"\nagent-flow will not start by itself when the computer starts ({how}).")
-        print("Running python install.py again keeps this choice. "
-              "To switch it back on: python install.py --autostart")
-        print("Start it by hand with: python start.py")
+        print(f"Running {common.PY} install.py again keeps this choice. "
+              f"To switch it back on: {common.PY} install.py --autostart")
+        print(f"Start it by hand with: {common.PY} start.py")
     else:
         lp = launcher_path(args.startup_dir)
         text = launcher_text()
@@ -447,10 +448,10 @@ def do_install(args) -> int:
         print(f"\nDone. Open http://127.0.0.1:{new_cfg['port']} and start a NEW "
               "Claude Code session inside the watch folder.")
     else:
-        print("\nDone. Start it now with:  python start.py")
+        print(f"\nDone. Start it now with:  {common.PY} start.py")
         print(f"Then open http://127.0.0.1:{new_cfg['port']} and start a NEW Claude Code session "
               "inside the watch folder.")
-    print("Check your hooks any time with:  python check_hooks.py")
+    print(f"Check your hooks any time with:  {common.PY} check_hooks.py")
     return 0
 
 
@@ -495,7 +496,9 @@ def main(argv=None) -> int:
     ap.add_argument("--package", help=f"npm package to run (default {common.DEFAULT_PACKAGE})")
     ap.add_argument("--port", type=int, help=f"web page port (default {common.UI_PORT})")
     ap.add_argument("--node-path", help="node program to put in the hook (default: the one on PATH)")
-    ap.add_argument("--startup-dir", help="Windows Startup folder override (for testing)")
+    # A Mac has no Startup folder, so the option is hidden from --help there.
+    ap.add_argument("--startup-dir", help="Windows Startup folder override (for testing)" if common.IS_WIN
+                    else argparse.SUPPRESS)
     when = ap.add_mutually_exclusive_group()
     when.add_argument("--no-autostart", action="store_true", help="do not add the file that starts agent-flow by itself each time you switch on your computer and sign in (removes it if you have it); saved, so later runs keep this choice")
     when.add_argument("--autostart", action="store_true", help="put that file back after an earlier --no-autostart")

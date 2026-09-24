@@ -122,7 +122,7 @@ def start(workspace: str, package: str, port: int, wait_s: float, foreground: bo
         log_line(f"[start.py] ended {n} agent-flow server(s) left behind for {workspace}")
     if common.port_answers(port):
         say(f"Port {port} is already in use by another program. "
-            f"Pick another with:  python install.py --port {port + 1}   then:  python start.py")
+            f"Pick another with:  {common.PY} install.py --port {port + 1}   then:  {common.PY} start.py")
         log_line(f"{REFUSED} port {port} is already in use by another program")
         return 3
     proc = launch(workspace, package, port, foreground, wait_s)

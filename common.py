@@ -20,6 +20,8 @@ from pathlib import Path
 NO_WINDOW = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 IS_WIN = sys.platform == "win32"
 IS_MAC = sys.platform == "darwin"
+# The command a member types to run Python: a Mac has python3 and no plain python.
+PY = "python3" if IS_MAC else "python"
 
 # The package version this kit was checked against on 2026-09-22.
 DEFAULT_PACKAGE = "agent-flow-app@0.9.1"
@@ -221,19 +223,19 @@ def why_it_stopped(tail: str) -> str:
     low = (tail or "").lower()
     if any(w in low for w in _ADDRESS_IN_USE):
         return ("The port agent-flow needed was taken by another program a moment before it "
-                "started. Run python start.py again.")
+                f"started. Run {PY} start.py again.")
     if any(w in low for w in _OLD_NODE):
         return (f"The Node.js on this computer is older than {MIN_NODE}. Install Node.js {MIN_NODE} "
-                "or newer from nodejs.org, open a NEW terminal, then run python start.py again.")
+                f"or newer from nodejs.org, open a NEW terminal, then run {PY} start.py again.")
     if any(w in low for w in _NO_NODE):
         return ("Node.js was not found on this computer. Install it from nodejs.org, open a NEW "
-                "terminal, then run python start.py again.")
+                f"terminal, then run {PY} start.py again.")
     if any(w in low for w in _NOT_ON_NPM):
         return (f"npm has no package with the name in config.json. Put it back to {DEFAULT_PACKAGE}, "
-                "then run python start.py again.")
+                f"then run {PY} start.py again.")
     if any(w in low for w in _NO_INTERNET):
         return ("This computer could not reach npm, the store agent-flow is downloaded from, and "
-                "agent-flow is not saved on it yet. Connect to the internet, then run python "
+                f"agent-flow is not saved on it yet. Connect to the internet, then run {PY} "
                 "start.py again.")
     last = [ln.strip() for ln in (tail or "").splitlines() if ln.strip()]
     if last:
@@ -262,22 +264,22 @@ def settings_fault(path: Path | None = None, point_at_check: bool = True) -> str
     raw = path.read_bytes()
     if not raw.strip():
         return (f"{path} is empty. agent-flow cannot read an empty file, so at its next start it "
-                "would replace it with a file that has only its own 9 hooks in it. Run: python install.py")
+                f"would replace it with a file that has only its own 9 hooks in it. Run: {PY} install.py")
     if raw.startswith(BOM):
         return (f"{path} starts with an invisible byte-order mark (some editors and PowerShell add it). "
-                "agent-flow cannot read a file like that and would replace it. Run: python install.py "
+                f"agent-flow cannot read a file like that and would replace it. Run: {PY} install.py "
                 "(it removes the mark after a backup).")
     try:
         data = strict_loads(raw.decode("utf-8"))
     except UnicodeDecodeError:
-        return f"{path} is not plain UTF-8 text. Fix it, then run: python install.py"
+        return f"{path} is not plain UTF-8 text. Fix it, then run: {PY} install.py"
     except ValueError as exc:
         return (f"{path} cannot be read ({json_error_in_words(exc)}). agent-flow would replace the "
                 "whole file. Open it at that line, fix it and save"
-                + (", then run: python check_hooks.py" if point_at_check else "."))
+                + (f", then run: {PY} check_hooks.py" if point_at_check else "."))
     if not isinstance(data, dict):
         return (f"{path} does not start with {{ and end with }}, so it is not a settings file. "
-                "Fix it, then run: python install.py")
+                f"Fix it, then run: {PY} install.py")
     return None
 
 
@@ -290,12 +292,12 @@ def settings_problem() -> str | None:
     same, keeping your other settings, if it cannot find its own hook in the file.
     So we only start it when it will find everything in order and leave the file alone."""
     if not hook_script().exists():
-        return f"agent-flow's hook script is missing ({hook_script()}). Run: python install.py"
+        return f"agent-flow's hook script is missing ({hook_script()}). Run: {PY} install.py"
     path = agent_flow_settings_path()
     is_claudes = norm_path(path) == norm_path(settings_path())
     if not path.exists():
         return ("Claude Code's settings.json does not exist yet, so agent-flow would write its own. "
-                "Run: python install.py") if is_claudes else None
+                f"Run: {PY} install.py") if is_claudes else None
     fault = settings_fault(path)
     if fault:
         return fault
@@ -303,9 +305,9 @@ def settings_problem() -> str | None:
     try:
         counts = count_agent_flow(data)
     except (AttributeError, TypeError):
-        return f"{path} has a 'hooks' block in a shape agent-flow does not expect. Run: python install.py"
+        return f"{path} has a 'hooks' block in a shape agent-flow does not expect. Run: {PY} install.py"
     if not any(counts.values()) and is_claudes:
-        return "The agent-flow hooks are not in settings.json. Run: python install.py"
+        return f"The agent-flow hooks are not in settings.json. Run: {PY} install.py"
     return None
 
 
