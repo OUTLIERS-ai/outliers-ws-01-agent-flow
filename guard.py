@@ -28,6 +28,7 @@ import datetime as _dt
 import http.client
 import os
 import socket
+import socketserver
 import subprocess
 import sys
 import threading
@@ -108,6 +109,21 @@ def start_child(workspace: str, package: str, out, attempts: int = 3, on_tick=No
             return None, port
         log(f"private port {port} was taken by another program; trying another (try {attempt + 1} of {attempts})")
     return None, port
+
+
+class PageServer(ThreadingHTTPServer):
+    """The standard server with no name look-up when it starts."""
+
+    def server_bind(self):
+        # http.server's own server_bind also asks for this address's name
+        # (socket.getfqdn), only to fill in server_name, which nothing here uses.
+        # On GitHub's test Macs that look-up took 35 seconds on every start
+        # (measured 2026-09-24), so the page answered 35 seconds late and the
+        # checks that wait 15 or 20 seconds for it failed. The name is now the
+        # address as given, with no look-up.
+        socketserver.TCPServer.server_bind(self)
+        host, port = self.server_address[:2]
+        self.server_name, self.server_port = str(host), port
 
 
 def allowed_hosts(port: int) -> set[str]:
@@ -220,7 +236,7 @@ def run(workspace: str, package: str, port: int, wait_s: float) -> int:
             log(f"agent-flow stopped straight away (exit code {child.returncode}). {why}")
             return 4
         try:
-            server = ThreadingHTTPServer(("127.0.0.1", port), make_handler(port, private))
+            server = PageServer(("127.0.0.1", port), make_handler(port, private))
         except OSError as exc:
             log(f"could not serve the page on port {port}: {exc}")
             return 3
