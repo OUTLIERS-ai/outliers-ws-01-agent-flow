@@ -128,3 +128,49 @@ def test_every_subprocess_call_hides_its_window():
             if "creationflags" not in window and "**kwargs" not in window and "launchctl" not in window:
                 bad.append(f"{f.name}:{src[:m.start()].count(chr(10)) + 1}")
     assert bad == []
+
+
+def test_rerun_keeps_the_no_autostart_choice(vaults, temp_home, capsys):
+    """Found 2026-09-24 (member test, finding 1): a later plain install.py put the Startup file back."""
+    port = free_port()
+    lp = install.launcher_path()
+    assert install.main(base_args(port)) == 0
+    assert lp.exists()
+    assert install.main(base_args(port) + ["--no-autostart"]) == 0
+    assert not lp.exists()
+    assert json.loads(common.config_path().read_text())["autostart"] is False
+    capsys.readouterr()
+
+    # The guide tells members to run install.py again after moving their vaults. No flag this time.
+    assert install.main(base_args(port)) == 0
+    out = capsys.readouterr().out
+    assert not lp.exists(), "a plain re-run must keep the member's --no-autostart choice"
+    assert json.loads(common.config_path().read_text())["autostart"] is False
+    assert "--autostart" in out, "the re-run must say how to switch it back on"
+
+    # Switching it back on is a separate, explicit choice.
+    assert install.main(base_args(port) + ["--autostart"]) == 0
+    assert lp.exists()
+    assert json.loads(common.config_path().read_text())["autostart"] is True
+    assert install.main(base_args(port)) == 0
+    assert lp.exists()
+
+
+def test_autostart_and_no_autostart_together_are_refused(temp_home):
+    with pytest.raises(SystemExit):
+        install.main(["--yes", "--autostart", "--no-autostart"])
+
+
+def test_tracking_line_is_true_after_no_autostart(vaults, temp_home, capsys):
+    """Found 2026-09-24 (member test, finding 2): the line said tracking was set by the file it had just removed."""
+    port = free_port()
+    assert install.main(base_args(port) + ["--no-autostart"]) == 0
+    out = capsys.readouterr().out
+    line = [ln for ln in out.splitlines() if ln.startswith("Usage tracking")]
+    assert len(line) == 1
+    assert "that file" not in line[0]
+    assert "start.py" in line[0]
+    # ...and the claim is backed: start.py and guard.py put both switches on every start.
+    assert common.QUIET_ENV == {"AGENT_FLOW_TELEMETRY": "false", "DO_NOT_TRACK": "1"}
+    for name in ("start.py", "guard.py"):
+        assert "common.QUIET_ENV" in (KIT / name).read_text(encoding="utf-8")

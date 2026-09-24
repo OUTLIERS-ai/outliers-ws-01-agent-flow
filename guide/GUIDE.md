@@ -109,7 +109,7 @@ Our fix changes only the direction of the slashes: the installer writes the same
 
 ### The usage-tracking finding
 
-agent-flow 0.9.1 sends anonymous usage events (an install code, its version, your operating system, session length) to a server run by its author, unless 1 of 2 switches is set before it starts: `AGENT_FLOW_TELEMETRY=false` or `DO_NOT_TRACK=1`. These are environment variables: settings a program reads from Windows or macOS when it starts. The GitHub page summary says tracking is off by default; the code switches it on. On Ashley's PC, 4 such events were logged between 2026-07-19 and 2026-08-06, because the file that started his agent-flow when his computer started set neither switch. Ours sets both.
+agent-flow 0.9.1 sends anonymous usage events (an install code, its version, your operating system, session length) to a server run by its author, unless 1 of 2 switches is set before it starts: `AGENT_FLOW_TELEMETRY=false` or `DO_NOT_TRACK=1`. These are environment variables: settings a program reads from Windows or macOS when it starts. The GitHub page summary says tracking is off by default; the code switches it on. On Ashley's PC, 4 such events were logged between 2026-07-19 and 2026-08-06, because the file that started his agent-flow when his computer started set neither switch. Ours sets both, and `start.py` sets both every time it starts agent-flow, so tracking stays off even if you choose not to have that file.
 
 ### 2026-08-06: switched off
 
@@ -148,7 +148,7 @@ Before this guide went out, our 5 Python scripts (the kit you download) were tes
 | Setup | About 1 minute with our installer, plus the first download. | Needs Node.js 22 or newer. |
 | What you see | A subagent appears within a second of starting, read from Claude Code's own session transcript file; every tool call is a card beside the agent that made it; the Review button at the bottom of the page replays a finished run. | 1 session per tab. There is no single screen with every session: our 2026-06-12 attempt to add that screen failed. FleetView (piece 2 of 4) is that screen. |
 | Accuracy | Tool calls come straight from Claude Code's own events; subagents, the conversation and the token counts are read from Claude Code's session transcript files. | Token counts and costs are estimates. On Ashley's PC they disagreed with FleetView (the session-and-cost screen in piece 2 of 4) for the same session. |
-| Privacy | agent-flow listens only on your own computer, and our kit makes all 3 ports (the page at 3001, which is `guard.py`'s, and agent-flow's own 2: its private page port and the port that receives events) refuse requests from other websites. | Tab titles show the first words of your prompts, so take care when screen-sharing. Usage tracking is on unless switched off (our file that starts agent-flow when the computer starts switches it off). A copy of agent-flow started by hand, without our kit, has none of these checks. |
+| Privacy | agent-flow listens only on your own computer, and our kit makes all 3 ports (the page at 3001, which is `guard.py`'s, and agent-flow's own 2: its private page port and the port that receives events) refuse requests from other websites. | Tab titles show the first words of your prompts, so take care when screen-sharing. agent-flow's own usage tracking (it sends anonymous usage figures to its author) is on unless switched off, and `start.py` switches it off every time it starts agent-flow, whether you start it by hand or it starts with the computer. A copy of agent-flow started by hand, without our kit, has none of these checks. |
 | Safety | Our kit will not start agent-flow on a settings file it would wipe, and puts the file back if it changes anyway. | agent-flow still runs its own set-up every time it starts. Our checks run before and after that set-up; they cannot stop it happening. |
 | Windows | Our kit fixes the 3 known Windows faults: the start folder, leftover registration files that swallow events, and the hook copies that pile up because of backslashes. Closing agent-flow by force (from Task Manager, or a crash) used to leave a second server running and sending the same events twice; `cleanup.py` now counts how many agent-flow servers are running, instead of how many folders are being watched, ends the extra server, and prints a line saying it did. | agent-flow's own registration files are still written by agent-flow, so a server closed by force leaves its file behind until the next `python start.py` or `python cleanup.py`. |
 
@@ -216,7 +216,7 @@ Every command below runs inside the downloaded folder. In a new terminal, type `
 - **If the page goes quiet:** run `python start.py --stop`, then `python start.py`, then open a new Claude Code session.
 - **If a start fails,** it now tells you why in 1 sentence on screen: the port was taken, the internet is not reachable and agent-flow is not saved on this computer yet, Node.js is missing or too old, or the package name in `config.json` is wrong. `python start.py --status` repeats that sentence later.
 - **Stopping:** `python start.py --stop` says "Stopped agent-flow." or "agent-flow was not running. Nothing to stop." Check any time with `python start.py --status`.
-- **If you move your vaults**, run `python install.py` again and give the new watch folder. The suggestions in square brackets are your OLD paths, so type the new ones for each vault and for the watch folder. If the server was running, the installer stops it and starts it again for the new folder.
+- **If you move your vaults**, run `python install.py` again and give the new watch folder. The suggestions in square brackets are your OLD paths, so type the new ones for each vault and for the watch folder. If the server was running, the installer stops it and starts it again for the new folder. If you once chose `--no-autostart`, running the installer again without it keeps that choice, because it is saved in `config.json`; `python install.py --autostart` switches starting with the computer back on.
 - **Screen-sharing:** close the tab or pick a demo session first. Tab titles show the start of your prompts.
 - **When you are not watching,** stop it with `python start.py --stop`. While it is stopped, no website can reach the page.
 
@@ -231,7 +231,7 @@ Every command below runs inside the downloaded folder. In a new terminal, type `
 1. Make the copy. Open a new terminal (it opens in your home folder, where the download is) and type 1 line. Windows: `Copy-Item -Recurse outliers-ws-01-agent-flow agent-flow-test`. Mac: `cp -R outliers-ws-01-agent-flow agent-flow-test`.
 2. Go into the copy with `cd agent-flow-test`, then delete its `logs` folder, which contains the record of your running agent-flow. Windows: `Remove-Item -Recurse -Force logs`. Mac: `rm -rf logs`. If Windows says the folder does not exist, there was nothing to delete.
 3. Once, first, install pytest, the program that runs the self-checks: `python -m pip install pytest` (Mac: `python3 -m pip install pytest`).
-4. In the copy, run `python -m pytest -q` after every change and expect `52 passed, 4 skipped`. The 4 skipped run only against the real agent-flow package, which the checks do not download; they stay skipped unless you set `AGENT_FLOW_REAL=1`. Any other answer means the change broke something, so put it back before you go on.
+4. In the copy, run `python -m pytest -q` after every change and expect `55 passed, 4 skipped`. The 4 skipped run only against the real agent-flow package, which the checks do not download; they stay skipped unless you set `AGENT_FLOW_REAL=1`. Any other answer means the change broke something, so put it back before you go on.
 5. When a change passes, copy the changed files back into your everyday folder, `outliers-ws-01-agent-flow`. Go into it with `cd ../outliers-ws-01-agent-flow`, then run `python start.py --stop`, then `python start.py`, then `python check_hooks.py`, and expect `RESULT: OK`. If you changed `install.py`, run `python install.py` there before `python start.py`.
 
 Read "Every command and setting" near the end of this guide before you ask Claude Code for a change: the watch folder, the port and whether agent-flow starts with the computer are already settings in `config.json`. Leave 1 line alone: the agent-flow hook line inside Claude Code's own `settings.json`. Never type that line by hand; `python install.py` writes it, and `python check_hooks.py` proves there is still exactly 1 copy of it on each event.
@@ -278,7 +278,7 @@ Add 1 NEW hook to my Claude Code settings.json on SubagentStart and SubagentStop
 Write stop_all.py and start_all.py in this folder. stop_all.py runs start.py --stop and then removes the agent-flow hooks using common.remove_agent_flow, with a backup. start_all.py puts the hooks back with common.install_agent_flow and runs start.py. Add tests using a temporary home folder, like the ones in tests/, and run them with python -m pytest -q.
 ```
 
-7. **Run it only when you want it.** Skip the file that starts agent-flow by itself when the computer starts, and make a desktop shortcut instead. `--no-autostart` also removes that file if you already have it.
+7. **Run it only when you want it.** Skip the file that starts agent-flow by itself when the computer starts, and make a desktop shortcut instead. `--no-autostart` also removes that file if you already have it. The choice is saved in `config.json`, so running `python install.py` again later keeps it; `python install.py --autostart` puts the file back.
 
 ```
 Run python install.py --no-autostart and check that outliers-agent-flow.vbs is no longer in my Startup folder. Then create a desktop shortcut called "Agent screen" that runs start.py with pythonw.exe (Windows) so no window appears, and a second one that runs start.py --stop.
@@ -300,7 +300,7 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 
 ![What is in the download, and what each file does.](img/download-folder.png)
 
-**install.py** (every option can be combined with the others)
+**install.py** (every option can be combined with the others, except `--autostart` with `--no-autostart`)
 
 | Option | What it does |
 |---|---|
@@ -309,7 +309,8 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 | `--second-brain <path>`, `--crm <path>` | Gives the vault paths instead of answering the questions. |
 | `--watch-folder <path>` | Sets the watch folder and skips the 3 questions. The installer warns you if a vault is not inside it. |
 | `--port <number>` | The page's port (default 3001). A running server is moved to the new port. |
-| `--no-autostart` | Does not add the file that starts agent-flow when the computer starts; also removes that file if you already have it. |
+| `--no-autostart` | Does not add the file that starts agent-flow when the computer starts; also removes that file if you already have it. The choice is saved in `config.json`, and later runs of `install.py` keep it. |
+| `--autostart` | Puts that file back after an earlier `--no-autostart`, and saves that choice instead. |
 | `--start-now` | Starts the server at the end, so you can skip step 6. |
 | `--uninstall` | Stops the server, removes every agent-flow hook (backup first) and the file that starts agent-flow when the computer starts. |
 | `--package`, `--node-path`, `--wait`, `--startup-dir` | Advanced and for testing. `--package`: which agent-flow version to run (default `agent-flow-app@0.9.1`). `--node-path`: which copy of Node.js the hook should use. `--wait`: how many seconds to wait for the first download (default 180). `--startup-dir`: a different Startup folder. |
@@ -331,7 +332,7 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 
 **Files the kit makes while it runs**
 
-- `config.json`: your 2 vault paths, the watch folder, the agent-flow version, the port and whether the file that starts agent-flow when the computer starts is switched on. `config.example.json` shows what the file looks like.
+- `config.json`: your 2 vault paths, the watch folder, the agent-flow version, the port and whether the file that starts agent-flow when the computer starts is switched on (later runs of `install.py` keep that answer unless you add `--autostart` or `--no-autostart`). `config.example.json` shows what the file looks like.
 - `logs/start.log`: the kit's own notes, such as a refused start or a settings file put back.
 - `logs/agent-flow.log`: agent-flow's own output. `start.py` reads its last 30 lines to work out the 1-sentence reason it prints when a start fails; open it yourself for the full text.
 - `logs/agent-flow.pid` (PID stands for process ID, the number Windows gives a running program): the number and start time of `guard.py`, which runs agent-flow, so `--stop` finds it and nothing else.
@@ -342,7 +343,7 @@ Create a Windows scheduled task that runs check_hooks.py once a week on Monday a
 
 - If you set `CLAUDE_CONFIG_DIR` (a setting that tells Claude Code to keep its settings in a different folder), the installer uses that folder. agent-flow itself always uses `<home>/.claude`, so it will not find your session transcripts and you get a half-drawn page. See the "Half a page" row of "When it goes wrong".
 - agent-flow also watches OpenAI Codex (OpenAI's coding assistant) unless the environment variable `AGENT_FLOW_RUNTIME=claude` is set. It does no harm if you do not use Codex.
-- The kit's 52 automatic self-checks run with `python -m pytest -q`, once pytest is installed (`python -m pip install pytest`). They use a made-up home folder and a stand-in for agent-flow, so your real settings are never touched; 6 of them need Node.js, which this piece needs anyway. 4 more checks run against the real agent-flow if you first set the environment variable `AGENT_FLOW_REAL=1`; without it those 4 are skipped. Measured on 2026-09-24 in a fresh copy with only pytest installed: 52 passed, 4 skipped.
+- The kit's 55 automatic self-checks run with `python -m pytest -q`, once pytest is installed (`python -m pip install pytest`). They use a made-up home folder and a stand-in for agent-flow, so your real settings are never touched; 6 of them need Node.js, which this piece needs anyway. 4 more checks run against the real agent-flow if you first set the environment variable `AGENT_FLOW_REAL=1`; without it those 4 are skipped. Measured on 2026-09-24 in a fresh copy with only pytest installed: 55 passed, 4 skipped.
 
 ## When it goes wrong
 

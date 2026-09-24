@@ -11,12 +11,16 @@ What it does, in order:
      agent-flow events has EXACTLY 1 copy of the hook. Extra copies are removed.
   5. Adds a hidden file that starts agent-flow by itself each time you switch on
      your computer and sign in (Windows: a .vbs in your Startup folder;
-     Mac: a launchd job), with usage tracking switched off.
+     Mac: a launchd job), unless you chose --no-autostart. That choice is
+     saved in config.json and kept on every later run until you pass
+     --autostart. start.py switches usage tracking off on every start.
 
 Run it twice and the second run changes nothing.
 
     python install.py                      # interview
     python install.py --yes                # accept the defaults it finds
+    python install.py --no-autostart       # no start-up file; later runs keep this
+    python install.py --autostart          # put the start-up file back
     python install.py --uninstall          # remove the hook and that start-up file
 """
 from __future__ import annotations
@@ -314,6 +318,18 @@ def python_help() -> str:
             "(on a Mac:  python3 --version) and run install.py again.")
 
 
+def want_autostart(args, cfg: dict) -> bool:
+    """--autostart or --no-autostart wins; with neither, keep the answer saved in config.json.
+
+    Without this, a plain re-run (the guide says to re-run after moving your vaults)
+    put back the start-with-the-computer file the member had switched off."""
+    if args.autostart:
+        return True
+    if args.no_autostart:
+        return False
+    return cfg.get("autostart", True) is not False
+
+
 def do_install(args) -> int:
     print("agent-flow installer (Outliers Accelerator, guide 1 of 4)\n")
     if tuple(sys.version_info[:2]) < MIN_PY:
@@ -354,7 +370,7 @@ def do_install(args) -> int:
         "watch_folder": watch,
         "package": args.package or cfg.get("package") or common.DEFAULT_PACKAGE,
         "port": args.port or cfg.get("port") or common.UI_PORT,
-        "autostart": not args.no_autostart,
+        "autostart": want_autostart(args, cfg),
     }
     moved = was_running and (common.norm_path(old_watch or "") != common.norm_path(watch)
                              or old_port != int(new_cfg["port"]))
@@ -397,15 +413,18 @@ def do_install(args) -> int:
         print("Removed an invisible byte-order mark from the start of settings.json "
               "(agent-flow cannot read a file that has one).")
 
-    if args.no_autostart:
+    if not new_cfg["autostart"]:
         lp = launcher_path(args.startup_dir)
+        how = "you chose --no-autostart" if args.no_autostart else "your earlier choice, saved in config.json"
         if lp.exists():
             if common.IS_MAC:
                 subprocess.run(["launchctl", "unload", str(lp)], capture_output=True)
             lp.unlink()
-            print(f"\nRemoved the file that starts agent-flow when the computer starts (you chose --no-autostart): {lp}")
+            print(f"\nRemoved the file that starts agent-flow when the computer starts ({how}): {lp}")
         else:
-            print("\nagent-flow will not start by itself when the computer starts (you chose --no-autostart).")
+            print(f"\nagent-flow will not start by itself when the computer starts ({how}).")
+        print("Running python install.py again keeps this choice. "
+              "To switch it back on: python install.py --autostart")
         print("Start it by hand with: python start.py")
     else:
         lp = launcher_path(args.startup_dir)
@@ -417,7 +436,8 @@ def do_install(args) -> int:
             print(f"\nFile that starts agent-flow when the computer starts, written: {lp}")
             if common.IS_MAC:
                 print(f"It runs the next time you sign in to your Mac. To start it now: launchctl load \"{lp}\"")
-    print("Usage tracking: off (AGENT_FLOW_TELEMETRY=false and DO_NOT_TRACK=1 are set by that file).")
+    print("Usage tracking: off. start.py switches it off every time it starts agent-flow "
+          "(AGENT_FLOW_TELEMETRY=false and DO_NOT_TRACK=1), by hand or when the computer starts.")
 
     running_now = False
     if args.start_now or moved:
@@ -476,7 +496,9 @@ def main(argv=None) -> int:
     ap.add_argument("--port", type=int, help=f"web page port (default {common.UI_PORT})")
     ap.add_argument("--node-path", help="node program to put in the hook (default: the one on PATH)")
     ap.add_argument("--startup-dir", help="Windows Startup folder override (for testing)")
-    ap.add_argument("--no-autostart", action="store_true", help="do not add the file that starts agent-flow by itself each time you switch on your computer and sign in")
+    when = ap.add_mutually_exclusive_group()
+    when.add_argument("--no-autostart", action="store_true", help="do not add the file that starts agent-flow by itself each time you switch on your computer and sign in (removes it if you have it); saved, so later runs keep this choice")
+    when.add_argument("--autostart", action="store_true", help="put that file back after an earlier --no-autostart")
     ap.add_argument("--start-now", action="store_true", help="start the server when done")
     ap.add_argument("--wait", type=float, default=180.0, help="seconds to wait for the first download")
     ap.add_argument("--uninstall", action="store_true", help="remove the hook and the file that starts agent-flow when the computer starts")

@@ -23,7 +23,7 @@ This folder does not contain agent-flow. It contains the safe way to install and
 | `check_hooks.py` | Counts every hook on every Claude Code event and flags any command registered twice. `--fix` keeps 1 of each after a backup. |
 | `cleanup.py` | Deletes the files left behind by agent-flow servers that have stopped, the Windows fault that silently stops events arriving, and ends a second server left watching the same folder. |
 | `common.py` | Shared code for the scripts above. |
-| `tests/` | 52 checks, run with `python -m pytest -q` after `python -m pip install pytest`. They use a temporary home folder and a stand-in for agent-flow; they never touch your real setup. 6 of them need Node.js. Set `AGENT_FLOW_REAL=1` to also run 4 checks against the real npm package; without it those 4 are skipped. Measured on 2026-09-24 in a fresh copy with only pytest installed: 52 passed, 4 skipped. |
+| `tests/` | 55 checks, run with `python -m pytest -q` after `python -m pip install pytest`. They use a temporary home folder and a stand-in for agent-flow; they never touch your real setup. 6 of them need Node.js. Set `AGENT_FLOW_REAL=1` to also run 4 checks against the real npm package; without it those 4 are skipped. Measured on 2026-09-24 in a fresh copy with only pytest installed: 55 passed, 4 skipped. |
 | `guide/GUIDE.md` | The full guide: how it was built, what went wrong, how to fit it to your own system. |
 
 ## What you need
@@ -39,7 +39,8 @@ This folder does not contain agent-flow. It contains the safe way to install and
 python install.py --yes                 # accept the defaults it finds
 python install.py --watch-folder "C:\Users\<you>\Documents" --yes
 python install.py --start-now           # start it straight away instead of the next time the computer starts
-python install.py --no-autostart        # does not start by itself when the computer starts (removes that file if you have it); start by hand with start.py
+python install.py --no-autostart        # does not start by itself when the computer starts (removes that file if you have it); start by hand with start.py. Saved: later runs keep it
+python install.py --autostart           # starts by itself when the computer starts again, after an earlier --no-autostart
 python install.py --port 3002           # another port; a running server moves to it
 python install.py --uninstall           # remove the hook and the file that starts agent-flow
 python start.py --status
