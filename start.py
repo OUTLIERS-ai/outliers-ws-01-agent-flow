@@ -93,6 +93,30 @@ def launch(workspace: str, package: str, port: int, foreground: bool = False,
     return proc
 
 
+def pass_stop_signals_to(guard: subprocess.Popen) -> None:
+    """Mac and Linux, --foreground only (the login job): when this start.py is stopped
+    (SIGTERM when the login job is switched off, SIGHUP when its Terminal window is closed),
+    stop the guard the normal way and wait for it, so the guard's clean-up ends agent-flow.
+    Without this, start.py ended at once and the guard was left to whatever the Mac did
+    to the rest of the job. Windows is unchanged."""
+    if common.IS_WIN:
+        return
+    import signal
+
+    def stop(signum, frame):
+        for s in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s, signal.SIG_IGN)
+        try:
+            guard.terminate()
+            guard.wait(timeout=20)
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        raise SystemExit(128 + signum)
+
+    for s in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(s, stop)
+
+
 def start(workspace: str, package: str, port: int, wait_s: float, foreground: bool, quiet: bool) -> int:
     def say(msg):
         if not quiet:
@@ -126,6 +150,8 @@ def start(workspace: str, package: str, port: int, wait_s: float, foreground: bo
         log_line(f"{REFUSED} port {port} is already in use by another program")
         return 3
     proc = launch(workspace, package, port, foreground, wait_s)
+    if foreground:
+        pass_stop_signals_to(proc)
     deadline = time.time() + wait_s
     while time.time() < deadline:
         if servers_for(workspace) and common.port_answers(port):

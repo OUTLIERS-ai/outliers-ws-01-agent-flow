@@ -69,6 +69,29 @@ def child_env() -> dict:
 # Seconds a child has to die before we treat it as the port race rather than a real fault.
 RACE_WINDOW_S = 12.0
 
+# Every agent-flow this guard started, so a stop signal at any moment still ends it (see main).
+_STARTED: list = []
+
+
+def end_on_stop_signals() -> None:
+    """Mac and Linux: turn SIGTERM and SIGHUP into a normal exit, so the clean-up that ends
+    agent-flow runs. Python's default for both is to end at once with no clean-up, and on a
+    Mac agent-flow runs in a process group of its own (start_child), so it is not ended with
+    the guard's group. SIGTERM is what the Mac sends when the login job is switched off
+    (launchctl unload); SIGHUP is what a closed Terminal window sends. Windows is unchanged."""
+    if common.IS_WIN:
+        return
+    import signal
+
+    def stop(signum, frame):
+        for s in (signal.SIGTERM, signal.SIGHUP):
+            signal.signal(s, signal.SIG_IGN)  # a 2nd signal must not cut the clean-up short
+        log(f"stopped by signal {signum}; ending agent-flow")
+        raise SystemExit(128 + signum)
+
+    for s in (signal.SIGTERM, signal.SIGHUP):
+        signal.signal(s, stop)
+
 
 def start_child(workspace: str, package: str, out, attempts: int = 3, on_tick=None):
     """Start agent-flow on a private port and hand back (child, port).
@@ -92,6 +115,7 @@ def start_child(workspace: str, package: str, out, attempts: int = 3, on_tick=No
         port = free_port()
         child = subprocess.Popen(common.npx_command(package) + ["--no-open", "--port", str(port)],
                                  **kwargs)
+        _STARTED.append(child)
         started = time.time()
         while time.time() - started < RACE_WINDOW_S:
             if on_tick:
@@ -267,7 +291,15 @@ def main(argv=None) -> int:
     a = ap.parse_args(argv)
     if a.kit_dir:
         common.KIT_DIR = Path(a.kit_dir)
-    return run(a.workspace, a.package, a.port, a.wait)
+    if common.IS_WIN:
+        return run(a.workspace, a.package, a.port, a.wait)
+    end_on_stop_signals()
+    try:
+        return run(a.workspace, a.package, a.port, a.wait)
+    finally:
+        for child in _STARTED:  # a stop signal while agent-flow was still starting
+            if child.poll() is None:
+                common.kill_tree(child.pid)
 
 
 if __name__ == "__main__":
