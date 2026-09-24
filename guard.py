@@ -83,6 +83,9 @@ def start_child(workspace: str, package: str, out, attempts: int = 3, on_tick=No
                   stderr=subprocess.STDOUT)
     if common.IS_WIN:
         kwargs["creationflags"] = common.NO_WINDOW
+    else:
+        # A process group of its own, so kill_tree ends agent-flow and its children, never us.
+        kwargs["start_new_session"] = True
     port = 0
     for attempt in range(1, attempts + 1):
         port = free_port()

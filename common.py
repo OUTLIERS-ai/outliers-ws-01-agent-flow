@@ -526,19 +526,57 @@ def http_answers(port: int, timeout: float = 1.5) -> bool:
         return False
 
 
+def _descendants(pid: int) -> list[int]:
+    """Every process started by this one, and by those, and so on (Mac and Linux)."""
+    try:
+        out = subprocess.run(["ps", "-A", "-o", "pid=,ppid="], capture_output=True, text=True,
+                             timeout=10, creationflags=NO_WINDOW).stdout or ""
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    children: dict[int, list[int]] = {}
+    for line in out.splitlines():
+        parts = line.split()
+        if len(parts) == 2 and parts[0].isdigit() and parts[1].isdigit():
+            children.setdefault(int(parts[1]), []).append(int(parts[0]))
+    found, todo = [], [pid]
+    while todo:
+        for kid in children.get(todo.pop(), []):
+            if kid not in found:
+                found.append(kid)
+                todo.append(kid)
+    return found
+
+
 def kill_tree(pid: int) -> None:
+    """End this program and every program it started.
+
+    On a Mac the quick way is to end the program's whole process group. That group is
+    only safe to end when the program was started in a group of its own: if it shares
+    the group of the program calling kill_tree, ending the group ends the caller too
+    (found on GitHub's test Macs 2026-09-24: the test run itself was ended). So the
+    caller's own group is never ended; the program and its children are ended one by one."""
     if IS_WIN:
         subprocess.run(["taskkill", "/T", "/F", "/PID", str(pid)], capture_output=True, creationflags=NO_WINDOW)
-    else:
-        import signal
+        return
+    import signal
 
+    try:
+        group = os.getpgid(pid)
+    except (ProcessLookupError, PermissionError):
+        group = None
+    if group is not None and group != os.getpgrp():
         try:
-            os.killpg(os.getpgid(pid), signal.SIGTERM)
+            os.killpg(group, signal.SIGTERM)
+            return
         except (ProcessLookupError, PermissionError):
-            try:
-                os.kill(pid, signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            pass
+    for p in _descendants(pid) + [pid]:
+        if p == os.getpid():
+            continue
+        try:
+            os.kill(p, signal.SIGTERM)
+        except (ProcessLookupError, PermissionError):
+            pass
 
 
 def norm_path(p) -> str:
