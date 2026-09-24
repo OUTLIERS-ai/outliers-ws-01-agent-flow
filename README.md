@@ -6,7 +6,7 @@ Watch your Claude Code agents hand work to each other, live, in your browser.
 git clone https://github.com/OUTLIERS-ai/outliers-ws-01-agent-flow; cd outliers-ws-01-agent-flow; python install.py
 ```
 
-On a Mac, type `python3` instead of `python`. Run the line from your home folder: the logon launcher points at this folder, so keep it where you cloned it.
+On a Mac, type `python3` instead of `python`. Run the line from your home folder: the file that starts agent-flow by itself each time you switch on your computer and sign in points at this folder, so keep it where you cloned it.
 
 ## What this is
 
@@ -16,13 +16,14 @@ This folder does not contain agent-flow. It contains the safe way to install and
 
 | File | What it does |
 |---|---|
-| `install.py` | Checks Python 3.11+ and Node.js 22+, asks where your vaults are, runs agent-flow once with a throwaway home folder so it writes its hook script without touching your settings, copies that script in, backs up your Claude Code `settings.json` and makes sure each of the 9 agent-flow events has exactly 1 copy of the hook, then adds a hidden logon launcher. `--uninstall` takes it all out again. |
+| `install.py` | Checks Python 3.11+ and Node.js 22+, asks where your vaults are, runs agent-flow once with a throwaway home folder so it writes its hook script without touching your settings, copies that script in, backs up your Claude Code `settings.json` and makes sure each of the 9 agent-flow events has exactly 1 copy of the hook, then adds a hidden file that starts agent-flow when the computer starts. `--uninstall` takes it all out again. |
 | `start.py` | Starts agent-flow with no window and usage tracking off, from the folder that contains your vaults. Refuses to start it if your `settings.json` would be wiped (see below). When a start fails it names the cause in 1 sentence. `--stop`, `--status`. |
-| `guard.py` | Started by `start.py`. Runs agent-flow on a private port, serves the page on 3001 only to requests addressed to 127.0.0.1 / localhost, and puts `settings.json` back if agent-flow rewrites it in its first 60 seconds. |
+| `guard.py` | Started by `start.py`. Runs agent-flow on a port picked at random that only guard.py uses, serves the page on 3001 only to requests addressed to 127.0.0.1 / localhost, and puts `settings.json` back if agent-flow rewrites it in its first 60 seconds. |
+| `only_this_computer.js` | Loaded into agent-flow by `guard.py` (Node.js's `--require` option), so agent-flow's own 2 ports also refuse requests from other websites. agent-flow's files are unchanged. |
 | `check_hooks.py` | Counts every hook on every Claude Code event and flags any command registered twice. `--fix` keeps 1 of each after a backup. |
-| `cleanup.py` | Deletes stale server registration files, the Windows fault that silently stops events arriving, and ends a second server left watching the same folder. |
+| `cleanup.py` | Deletes the files left behind by agent-flow servers that have stopped, the Windows fault that silently stops events arriving, and ends a second server left watching the same folder. |
 | `common.py` | Shared code for the scripts above. |
-| `tests/` | 45 checks, run with `python -m pytest -q`. They use a temporary home folder and a stand-in for agent-flow; they never touch your real setup. Set `AGENT_FLOW_REAL=1` to also run 4 checks against the real npm package; without it those 4 are skipped. Measured from a fresh copy on 2026-09-23: 45 passed, 4 skipped. |
+| `tests/` | 52 checks, run with `python -m pytest -q` after `python -m pip install pytest`. They use a temporary home folder and a stand-in for agent-flow; they never touch your real setup. 6 of them need Node.js. Set `AGENT_FLOW_REAL=1` to also run 4 checks against the real npm package; without it those 4 are skipped. Measured on 2026-09-24 in a fresh copy with only pytest installed: 52 passed, 4 skipped. |
 | `guide/GUIDE.md` | The full guide: how it was built, what went wrong, how to fit it to your own system. |
 
 ## What you need
@@ -37,10 +38,10 @@ This folder does not contain agent-flow. It contains the safe way to install and
 ```
 python install.py --yes                 # accept the defaults it finds
 python install.py --watch-folder "C:\Users\<you>\Documents" --yes
-python install.py --start-now           # start it straight away instead of at next logon
-python install.py --no-autostart        # no logon launcher (removes an existing one); start by hand with start.py
+python install.py --start-now           # start it straight away instead of the next time the computer starts
+python install.py --no-autostart        # does not start by itself when the computer starts (removes that file if you have it); start by hand with start.py
 python install.py --port 3002           # another port; a running server moves to it
-python install.py --uninstall           # remove the hook and the launcher
+python install.py --uninstall           # remove the hook and the file that starts agent-flow
 python start.py --status
 python check_hooks.py
 python cleanup.py --dry-run
@@ -50,10 +51,10 @@ After installing, open http://127.0.0.1:3001 and start a NEW Claude Code session
 
 ## Faults this fixes
 
-1. **Hook copies pile up on Windows.** agent-flow 0.9.1 checks whether it is already set up by looking for the text `agent-flow/hook.js` in your settings. On Windows the path it writes uses backslashes (`agent-flow\hook.js`), so it never finds its own entry and adds another copy every time it starts. We write the same hook with forward slashes, which Windows accepts and agent-flow recognises. Tested 2026-09-22: 3 stock starts gave 3 copies per event; with our line in place, 2 more starts changed nothing.
-2. **Stale registration files.** Each start writes `<home>/.claude/agent-flow/<code>-<process number>.json`. On Windows the hook never removes files for servers that have ended. `start.py` runs `cleanup.py` before every start.
-3. **agent-flow can wipe your whole `settings.json` at start.** It runs its own setup every time it starts; if it cannot read the file (a trailing comma, or an invisible byte-order mark that PowerShell and some editors add) it writes a new file containing only its hooks. With a logon launcher that happens silently at logon. `start.py` checks the file first and will not start agent-flow on an unsafe file (the reason goes to the screen and `logs/start.log`; `python start.py --status` repeats it). `guard.py` also keeps the exact bytes and puts them back if agent-flow changes the file anyway. `python install.py` removes a byte-order mark after a backup. Proven with the real package on 2026-09-22 (`tests/test_real_package.py`).
-4. **Other websites could read the live page (DNS rebinding).** agent-flow's page ignores the web address a request was sent to. `guard.py` now answers only requests addressed to your own computer. agent-flow's separate event port still accepts events from any web page (a site that guesses the port could draw fake sessions, not read anything); that needs a fix upstream. Stop agent-flow with `python start.py --stop` when you are not watching.
+1. **Hook copies pile up on Windows.** agent-flow 0.9.1 checks whether it is already set up by looking for the text `agent-flow/hook.js` in your settings. On Windows the path it writes uses backslashes (`agent-flow\hook.js`), so it never finds its own entry and adds another copy every time it starts. We write the same hook with forward slashes, which Windows accepts and agent-flow recognises. Tested 2026-09-22: 3 starts of agent-flow as its author published it gave 3 copies per event; with our line in place, 2 more starts changed nothing.
+2. **Registration files left behind by stopped servers.** Each start writes `<home>/.claude/agent-flow/<code>-<process number>.json`. On Windows the hook never removes files for servers that have ended. `start.py` runs `cleanup.py` before every start.
+3. **agent-flow can wipe your whole `settings.json` at start.** It runs its own setup every time it starts; if it cannot read the file (a trailing comma, or an invisible byte-order mark that PowerShell and some editors add) it writes a new file containing only its hooks. Because agent-flow starts by itself when the computer starts, that happens with nothing on screen to tell you. `start.py` checks the file first and will not start agent-flow on an unsafe file (the reason goes to the screen and `logs/start.log`; `python start.py --status` repeats it). `guard.py` also keeps the exact bytes and puts them back if agent-flow changes the file anyway. `python install.py` removes a byte-order mark after a backup. Proven with the real package on 2026-09-22 (`tests/test_real_package.py`).
+4. **Other websites could read the live page** (a trick where a website sends its requests to your own computer). agent-flow's page ignores the web address a request was sent to. `guard.py` answers only requests addressed to your own computer on port 3001. On 2026-09-24 a test with the real package showed agent-flow's own 2 ports were still open: its private page port gave the page and the live stream to a request naming another website, and its event port drew a made-up event sent from another website. `guard.py` now loads `only_this_computer.js` into agent-flow, and both ports refuse such requests (5 of 5 refused in the same test; `tests/test_other_websites.py`). A copy of agent-flow started by hand has none of these checks. Stop agent-flow with `python start.py --stop` when you are not watching.
 5. **`--stop` could close an unrelated program** after a restart reused the saved process number. The saved record now includes the process start time and stop checks both.
 6. **A start that failed told you nothing you could use.** It printed "The server stopped straight away" and a path to 20 lines of Node.js text. `start.py` now reads the last 30 lines of `logs/agent-flow.log`, matches the known shapes (port taken, no internet with the package not saved yet, Node.js missing or too old, package name wrong) and prints 1 plain sentence. `python start.py --status` repeats it.
 7. **The private port was picked, let go, then handed to agent-flow**, and Windows could give that number away in between. It failed 1 start in 34 on 2026-09-22. If agent-flow now dies within 12 seconds and the port is answering to something else, the guard picks another number and tries again, 3 times in all.
@@ -62,7 +63,7 @@ After installing, open http://127.0.0.1:3001 and start a NEW Claude Code session
 
 ## Usage tracking
 
-agent-flow 0.9.1 sends anonymous usage events (an install code, version, operating system, session length) to its author's server unless `AGENT_FLOW_TELEMETRY=false` or `DO_NOT_TRACK=1` is set. Both are set by `start.py` and by the launcher. If you ever run `npx agent-flow-app` by hand, set them yourself first.
+agent-flow 0.9.1 sends anonymous usage events (an install code, version, operating system, session length) to its author's server unless `AGENT_FLOW_TELEMETRY=false` or `DO_NOT_TRACK=1` is set. Both are set by `start.py` and by the file that starts agent-flow when the computer starts. If you ever run `npx agent-flow-app` by hand, set them yourself first.
 
 ## Licence
 

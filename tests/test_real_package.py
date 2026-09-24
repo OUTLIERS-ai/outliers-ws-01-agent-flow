@@ -69,6 +69,32 @@ def test_real_agent_flow_clean_start_changes_nothing_and_page_is_guarded(real):
     assert r.status == 200 and b"index.js" in r.read()
     c.close()
 
+    # agent-flow's own 2 ports refuse other websites too (only_this_computer.js, 2026-09-24)
+    import re
+
+    log = (common.logs_dir() / "start.log").read_text(encoding="utf-8")
+    private = int(re.findall(r"answering on private port (\d+)", log)[-1])
+    event = [i for i in common.discovery_files() if i["live"]][-1]["port"]
+
+    def status(p, method, host, origin=None):
+        c = http.client.HTTPConnection("127.0.0.1", p, timeout=10)
+        c.putrequest(method, "/", skip_host=True)
+        c.putheader("Host", host)
+        if origin:
+            c.putheader("Origin", origin)
+        c.putheader("Content-Length", "2" if method == "POST" else "0")
+        c.endheaders()
+        if method == "POST":
+            c.send(b"{}")
+        s = c.getresponse().status
+        c.close()
+        return s
+
+    assert status(private, "GET", f"127.0.0.1:{private}") == 200
+    assert status(private, "GET", f"attacker.example:{private}") == 403
+    assert status(event, "POST", f"127.0.0.1:{event}") == 200
+    assert status(event, "POST", f"127.0.0.1:{event}", origin="https://attacker.example") == 403
+
 
 def test_real_agent_flow_rewrite_is_put_back_by_the_guard(real):
     """Skips start.py's check on purpose (launches the guard directly) so the real

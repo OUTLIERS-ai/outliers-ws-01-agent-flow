@@ -234,6 +234,15 @@ def test_the_installer_refuses_a_python_older_than_the_floor(temp_home, monkeypa
     assert not common.settings_path().exists(), "nothing may be written when it refuses"
 
 
+def test_the_python_refusal_tells_the_truth_about_security_fixes(monkeypatch):
+    """Added 2026-09-24: the printed refusal said a 3.10 'no longer gets security fixes',
+    while the guide said (correctly, python.org) it gets them until 2026-10-31."""
+    monkeypatch.setattr(install.sys, "version_info", (3, 10, 14, "final", 0))
+    text = install.python_help()
+    assert "no longer gets security fixes" not in text
+    assert "3.10 gets security fixes only until 2026-10-31" in text
+
+
 def test_the_installer_refuses_a_node_older_than_the_floor(temp_home, monkeypatch, capsys):
     monkeypatch.delenv("AGENT_FLOW_NPX_CMD")
     monkeypatch.setattr(common, "node_version", lambda: (20, 19, 0))

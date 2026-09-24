@@ -9,14 +9,15 @@ What it does, in order:
      its own hook script without touching your settings; copies that script in.
   4. Backs up your Claude Code settings.json, then makes sure each of the 9
      agent-flow events has EXACTLY 1 copy of the hook. Extra copies are removed.
-  5. Adds a hidden logon launcher (Windows: a .vbs in your Startup folder;
+  5. Adds a hidden file that starts agent-flow by itself each time you switch on
+     your computer and sign in (Windows: a .vbs in your Startup folder;
      Mac: a launchd job), with usage tracking switched off.
 
 Run it twice and the second run changes nothing.
 
     python install.py                      # interview
     python install.py --yes                # accept the defaults it finds
-    python install.py --uninstall          # remove the hook and the launcher
+    python install.py --uninstall          # remove the hook and that start-up file
 """
 from __future__ import annotations
 
@@ -36,7 +37,7 @@ import start as starter
 LAUNCHER_NAME_WIN = "outliers-agent-flow.vbs"
 LAUNCHER_LABEL_MAC = "com.outliers.agent-flow"
 
-# Python 3.8 stopped getting security fixes on 2024-10-07 and 3.10 dies on 2026-10-31,
+# Python 3.8 stopped getting security fixes on 2024-10-07 and 3.10 gets them only until 2026-10-31,
 # so the floor is 3.11 (checked 2026-09-22). This installer TESTS it, it does not only
 # name it in the README.
 MIN_PY = (3, 11)
@@ -134,7 +135,7 @@ def pythonw() -> str:
 def vbs_text() -> str:
     start_py = common.KIT_DIR / "start.py"
     return (
-        "' Starts agent-flow at logon with no window. Written by outliers-ws-01-agent-flow install.py.\n"
+        "' Starts agent-flow with no window each time the computer starts and you sign in. Written by outliers-ws-01-agent-flow install.py.\n"
         "' The 0 below hides the window. Remove this file (or run install.py --uninstall) to stop it.\n"
         'Set sh = CreateObject("WScript.Shell")\n'
         'Set env = sh.Environment("PROCESS")\n'
@@ -306,11 +307,11 @@ def node_help() -> str:
 def python_help() -> str:
     want = ".".join(map(str, MIN_PY))
     have = ".".join(map(str, sys.version_info[:3]))
-    return (f"This kit needs Python {want} or newer. This terminal is running Python {have}, "
-            "which no longer gets security fixes.\n"
+    return (f"This kit needs Python {want} or newer. This terminal is running Python {have}.\n"
+            "Python 3.10 gets security fixes only until 2026-10-31, and older versions get none.\n"
             "Install a current Python from https://python.org (on a Mac, python.org or "
             "`brew install python`), open a NEW terminal, check with:  python --version\n"
-            "and run install.py again.")
+            "(on a Mac:  python3 --version) and run install.py again.")
 
 
 def do_install(args) -> int:
@@ -402,20 +403,20 @@ def do_install(args) -> int:
             if common.IS_MAC:
                 subprocess.run(["launchctl", "unload", str(lp)], capture_output=True)
             lp.unlink()
-            print(f"\nRemoved the file that starts agent-flow at logon (you chose --no-autostart): {lp}")
+            print(f"\nRemoved the file that starts agent-flow when the computer starts (you chose --no-autostart): {lp}")
         else:
-            print("\nagent-flow will not start at logon (you chose --no-autostart).")
+            print("\nagent-flow will not start by itself when the computer starts (you chose --no-autostart).")
         print("Start it by hand with: python start.py")
     else:
         lp = launcher_path(args.startup_dir)
         text = launcher_text()
         if lp.exists() and lp.read_text(encoding="utf-8") == text:
-            print(f"\nFile that starts agent-flow at logon, already in place: {lp}")
+            print(f"\nFile that starts agent-flow when the computer starts, already in place: {lp}")
         else:
             common.atomic_write_text(lp, text)
-            print(f"\nFile that starts agent-flow at logon, written: {lp}")
+            print(f"\nFile that starts agent-flow when the computer starts, written: {lp}")
             if common.IS_MAC:
-                print(f"It runs at your next login. To start it now: launchctl load \"{lp}\"")
+                print(f"It runs the next time you sign in to your Mac. To start it now: launchctl load \"{lp}\"")
     print("Usage tracking: off (AGENT_FLOW_TELEMETRY=false and DO_NOT_TRACK=1 are set by that file).")
 
     running_now = False
@@ -457,9 +458,9 @@ def do_uninstall(args) -> int:
         if common.IS_MAC:
             subprocess.run(["launchctl", "unload", str(lp)], capture_output=True)
         lp.unlink()
-        print(f"Removed the file that starts agent-flow at logon: {lp}")
+        print(f"Removed the file that starts agent-flow when the computer starts: {lp}")
     else:
-        print("No file that starts agent-flow at logon was found.")
+        print("No file that starts agent-flow when the computer starts was found.")
     print(f"Left in place (agent-flow's own files, safe to delete by hand): {common.discovery_dir()}"
           + (f" and {common.home() / '.agent-flow'}" if (common.home() / '.agent-flow').exists() else ""))
     return 0
@@ -475,10 +476,10 @@ def main(argv=None) -> int:
     ap.add_argument("--port", type=int, help=f"web page port (default {common.UI_PORT})")
     ap.add_argument("--node-path", help="node program to put in the hook (default: the one on PATH)")
     ap.add_argument("--startup-dir", help="Windows Startup folder override (for testing)")
-    ap.add_argument("--no-autostart", action="store_true", help="do not add the logon launcher")
+    ap.add_argument("--no-autostart", action="store_true", help="do not add the file that starts agent-flow by itself each time you switch on your computer and sign in")
     ap.add_argument("--start-now", action="store_true", help="start the server when done")
     ap.add_argument("--wait", type=float, default=180.0, help="seconds to wait for the first download")
-    ap.add_argument("--uninstall", action="store_true", help="remove the hook and the launcher")
+    ap.add_argument("--uninstall", action="store_true", help="remove the hook and the file that starts agent-flow when the computer starts")
     args = ap.parse_args(argv)
     return do_uninstall(args) if args.uninstall else do_install(args)
 

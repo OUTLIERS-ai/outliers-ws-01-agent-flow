@@ -13,6 +13,11 @@
    address that first points at the website, then at your own computer). So agent-flow
    runs on a private port, and this file serves the page on your port (3001), passing
    on only requests addressed to 127.0.0.1, localhost or [::1]. Anything else gets 403.
+   That alone left agent-flow's own 2 ports open (tested 2026-09-24): the private port
+   answered a request naming another website, and the port hook.js sends events to took
+   events from any website. So agent-flow is also started with only_this_computer.js
+   loaded first (Node.js's --require option, see child_env), which applies the same
+   check inside agent-flow, on both of its ports. agent-flow's own files are unchanged.
 
     python guard.py --workspace <folder> --package agent-flow-app@0.9.1 --port 3001
 """
@@ -28,6 +33,7 @@ import sys
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 
 import common
 
@@ -49,6 +55,16 @@ def free_port() -> int:
     return port
 
 
+def child_env() -> dict:
+    """The settings agent-flow starts with: usage tracking off, and only_this_computer.js
+    loaded first, so agent-flow's own 2 ports refuse requests from other websites.
+    Any NODE_OPTIONS you set yourself are kept."""
+    js = str(Path(__file__).resolve().parent / "only_this_computer.js").replace("\\", "/")
+    js = js.replace('"', '\\"')  # Node reads NODE_OPTIONS like a command line: quote the path
+    mine = os.environ.get("NODE_OPTIONS", "").strip()
+    return dict(os.environ, **common.QUIET_ENV, NODE_OPTIONS=(mine + " " if mine else "") + f'--require "{js}"')
+
+
 # Seconds a child has to die before we treat it as the port race rather than a real fault.
 RACE_WINDOW_S = 12.0
 
@@ -62,7 +78,7 @@ def start_child(workspace: str, package: str, out, attempts: int = 3, on_tick=No
     cannot read the real one back from it: instead, when the child dies within a few
     seconds and the port is now answering to somebody else, we pick another number
     and try again. (child, port) is (None, last port) when every try failed."""
-    env = dict(os.environ, **common.QUIET_ENV)
+    env = child_env()
     kwargs = dict(cwd=workspace, env=env, stdin=subprocess.DEVNULL, stdout=out,
                   stderr=subprocess.STDOUT)
     if common.IS_WIN:
@@ -231,8 +247,6 @@ def main(argv=None) -> int:
     ap.add_argument("--kit-dir", help="where config.json and logs/ live (default: this folder)")
     a = ap.parse_args(argv)
     if a.kit_dir:
-        from pathlib import Path
-
         common.KIT_DIR = Path(a.kit_dir)
     return run(a.workspace, a.package, a.port, a.wait)
 

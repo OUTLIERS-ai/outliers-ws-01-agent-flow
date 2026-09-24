@@ -14,7 +14,7 @@ and puts it back if agent-flow changed it anyway.
     python start.py              # start it in the background, then print the address
     python start.py --stop       # stop the server this kit started
     python start.py --status     # say whether it is running (and why not, if it refused)
-    python start.py --foreground # run and wait (used by the Mac logon job)
+    python start.py --foreground # run and wait (used by the Mac start-up job)
 """
 from __future__ import annotations
 
