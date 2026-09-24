@@ -72,7 +72,7 @@ This is how Ashley set agent-flow up on his own Windows PC, what broke, and what
 
 agent-flow is 1 of 4 screens Ashley built around his agents. The other 3 each have their own guide in this set of 4: FleetView, ProjectForge and Jeeves.
 
-![Ashley's real screens side by side, 2026-09-22: Jeeves (a personal-assistant screen over his second brain), ProjectForge (a board of work cards his agents pick up), FleetView (every running Claude Code session and its cost on 1 page) and agent-flow (bottom right).](img/original-full-cockpit.png)
+![Ashley's real screens side by side, 2026-09-22: Jeeves (a personal-assistant screen over his second brain), ProjectForge (a board of work cards his agents pick up, cut short so that no card naming a real person shows), FleetView (every running Claude Code session and its cost on 1 page) and agent-flow (bottom right).](img/original-full-cockpit.png)
 
 Claude Code lets you register a **hook**: a command it runs by itself every time a given event happens, such as "a tool is about to be used" or "a subagent has started". agent-flow registers a small script, `hook.js`, on 9 kinds of event. Each time 1 of them happens, Claude Code runs `hook.js` and hands it a description of the event. The script looks in the folder `<your home>/.claude/agent-flow/` for small files that say where the agent-flow server (the agent-flow program running in the background, which draws the page) is listening, and sends the event there. The server updates its picture and your browser redraws.
 
